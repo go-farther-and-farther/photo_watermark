@@ -717,6 +717,14 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
 
 
 def main():
+    # 显示项目信息
+    print("=" * 50)
+    print("  Photo Watermark - 相机照片水印边框生成器")
+    print("  版本: v1.0.1")
+    print("  项目: https://github.com/go-farther-and-farther/photo_watermark")
+    print("=" * 50)
+    print()
+
     parser = argparse.ArgumentParser(
         description='相机照片水印边框生成器',
         formatter_class=argparse.RawDescriptionHelpFormatter,
