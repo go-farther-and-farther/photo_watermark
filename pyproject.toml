@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "photo-watermark"
+version = "1.0.0"
+description = "相机照片水印边框生成器 - 自动读取EXIF信息，生成专业水印边框"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+requires-python = ">=3.6"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "Pillow>=10.0.0",
+    "exifread>=3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/photo-watermark"
+Documentation = "https://github.com/yourusername/photo-watermark#readme"
+Repository = "https://github.com/yourusername/photo-watermark"
+Issues = "https://github.com/yourusername/photo-watermark/issues"
+
+[project.scripts]
+photo-watermark = "photo_watermark:main"
+
+[tool.setuptools]
+py-modules = ["photo_watermark"]
+
+[tool.setuptools.package-data]
+"*" = ["*.png"]
