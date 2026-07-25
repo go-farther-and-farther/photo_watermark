@@ -2,8 +2,6 @@
 
 给相机照片添加水印边框，显示拍摄参数（EXIF信息），支持批量处理。
 
-![示例效果](test_output22.jpg)
-
 ## 功能特点
 
 - **自动读取EXIF拍摄参数**
@@ -24,24 +22,36 @@
   - 默认使用Nikon风格Logo
   - 可自定义Logo图片
 
-## 安装
+## 下载
+
+### 方式1：直接下载exe（推荐）
+
+下载 `photo_watermark.exe`，无需安装Python环境。
+
+### 方式2：源码安装
 
 ```bash
+git clone https://github.com/go-farther-and-farther/photo_watermark.git
+cd photo_watermark
 pip install -r requirements.txt
-```
-
-或手动安装：
-
-```bash
-pip install Pillow exifread
 ```
 
 ## 使用方法
 
-### 基本用法
+### exe用户
 
 ```bash
-# 处理单张图片（使用默认布局）
+# 处理单张图片
+photo_watermark.exe input.jpg -o output.jpg
+
+# 处理整个文件夹
+photo_watermark.exe ./input/ -o ./output/
+```
+
+### 源码用户
+
+```bash
+# 处理单张图片
 python photo_watermark.py input.jpg -o output.jpg
 
 # 处理整个文件夹
@@ -54,17 +64,16 @@ python photo_watermark.py ./input/ -o ./output/
 |------|------|--------|
 | `input` | 输入图片或文件夹路径 | `./input` |
 | `-o, --output` | 输出路径 | `./output` |
-| `-s, --style` | 边框样式 | `white` |
-| `-t, --text` | 自定义水印文字 | 空 |
 | `--quality` | JPEG输出质量 (1-100) | `95` |
 | `--logo` | Logo图片路径 | `nikon_logo.png` |
 
-## 自定义布局
+## 自定义配置
 
-编辑 `photo_watermark.py` 顶部的布局参数：
+编辑 `config.py` 文件来自定义水印样式：
 
 ```python
-# ========== 布局参数（手动调整区域） ==========
+# ========== 布局参数配置文件 ==========
+
 # 边框设置
 BORDER_HEIGHT_RATIO = 0.08      # 边框高度（相对于图片高度）
 
@@ -87,6 +96,8 @@ COLOR_PARAMS = (30, 30, 30)     # 拍摄参数颜色
 COLOR_DATE = (100, 100, 100)    # 日期颜色
 ```
 
+**注意：exe用户需要将 `config.py` 和 `nikon_logo.png` 放在exe同目录下。**
+
 ## 效果预览
 
 处理后的图片底部会显示：
@@ -101,7 +112,9 @@ NIKKOR Z 24-120mm f/4 S            2026-07-25
 
 ```
 photo_watermark/
-├── photo_watermark.py    # 主程序
+├── photo_watermark.exe   # 可执行文件（Windows）
+├── photo_watermark.py    # 主程序（源码）
+├── config.py            # 配置文件
 ├── nikon_logo.png        # Nikon Logo
 ├── requirements.txt      # 依赖
 ├── README.md            # 说明文档
@@ -111,7 +124,7 @@ photo_watermark/
 
 ## 依赖
 
-- Python 3.6+
+- Python 3.6+（源码运行需要）
 - Pillow
 - exifread
 
