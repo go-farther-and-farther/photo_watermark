@@ -94,6 +94,8 @@ def read_exif(image_path: str) -> Dict[str, str]:
         if 'Image Model' in tags:
             make = str(tags.get('Image Make', '')).strip()
             model = str(tags['Image Model']).strip()
+            # 保存品牌信息用于Logo选择
+            exif_data['brand'] = make.upper()
             # 精简显示：只保留品牌核心词+型号
             if make and model:
                 # 去掉冗余词（大小写不敏感）
@@ -200,6 +202,48 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
     # 如果都失败，使用默认字体
     return ImageFont.load_default()
+
+
+def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
+    """
+    根据相机品牌自动选择对应的Logo
+
+    Args:
+        brand: 相机品牌（如 NIKON, CANON, SONY, FUJIFILM）
+        logo_dir: Logo文件所在目录
+
+    Returns:
+        Logo文件路径
+    """
+    # 品牌到Logo文件的映射
+    brand_logo_map = {
+        'NIKON': 'nikon_logo.png',
+        'CANON': 'canon_logo.png',
+        'SONY': 'sony_logo.png',
+        'FUJIFILM': 'fuji_logo.png',
+        'FUJI': 'fuji_logo.png',
+    }
+
+    # 清理品牌名称
+    brand_upper = brand.upper().strip()
+
+    # 查找匹配的Logo
+    for key, logo_file in brand_logo_map.items():
+        if key in brand_upper:
+            if logo_dir:
+                logo_path = Path(logo_dir) / logo_file
+            else:
+                logo_path = Path(__file__).parent / logo_file
+            if logo_path.exists():
+                return str(logo_path)
+
+    # 默认返回Nikon Logo
+    if logo_dir:
+        default_logo = Path(logo_dir) / 'nikon_logo.png'
+    else:
+        default_logo = Path(__file__).parent / 'nikon_logo.png'
+
+    return str(default_logo) if default_logo.exists() else ''
 
 
 def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
@@ -574,12 +618,20 @@ def process_single_image(
             image = auto_rotate_image(image, orientation)
             print(f"  图片已自动旋转 (方向: {orientation})")
 
+        # 自动选择Logo（根据相机品牌）
+        logo_path = kwargs.get('logo_path', '')
+        if not logo_path or not Path(logo_path).exists():
+            brand = exif_data.get('brand', '')
+            if brand:
+                logo_path = get_logo_by_brand(brand)
+                print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
+
         # 根据样式应用水印
         if style == 'white':
             result = apply_white_border(
                 image, exif_data, custom_text,
                 border_ratio=kwargs.get('border_ratio', 0.06),
-                logo_path=kwargs.get('logo_path', ''),
+                logo_path=logo_path,
             )
         elif style == 'transparent':
             result = apply_transparent_watermark(
@@ -720,7 +772,7 @@ def main():
     # 显示项目信息
     print("=" * 50)
     print("  Photo Watermark - 相机照片水印边框生成器")
-    print("  版本: v1.0.1")
+    print("  版本: v1.1.0")
     print("  项目: https://github.com/go-farther-and-farther/photo_watermark")
     print("=" * 50)
     print()
