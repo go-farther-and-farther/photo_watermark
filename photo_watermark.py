@@ -794,11 +794,56 @@ def main():
 
     args = parser.parse_args()
 
-    # 检查输入路径
+    # 检查输入路径，不存在时弹出文件夹选择对话框
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"错误: 输入路径不存在 - {args.input}")
-        sys.exit(1)
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            # 创建隐藏的主窗口
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+
+            # 询问用户选择文件还是文件夹
+            print(f"路径不存在: {args.input}")
+            print("请选择要处理的内容：")
+            print("1. 选择单张图片")
+            print("2. 选择文件夹（批量处理）")
+
+            choice = input("请输入选择 (1/2): ").strip()
+
+            if choice == '1':
+                # 选择单张图片
+                filetypes = [
+                    ("图片文件", "*.jpg *.jpeg *.png *.tiff *.bmp"),
+                    ("所有文件", "*.*")
+                ]
+                selected = filedialog.askopenfilename(
+                    title="选择要处理的图片",
+                    filetypes=filetypes
+                )
+                if selected:
+                    input_path = Path(selected)
+                else:
+                    print("未选择文件，程序退出")
+                    sys.exit(0)
+            else:
+                # 选择文件夹
+                selected = filedialog.askdirectory(title="选择要处理的文件夹")
+                if selected:
+                    input_path = Path(selected)
+                else:
+                    print("未选择文件夹，程序退出")
+                    sys.exit(0)
+
+            root.destroy()
+            print(f"已选择: {input_path}")
+
+        except ImportError:
+            print(f"错误: 输入路径不存在 - {args.input}")
+            sys.exit(1)
 
     # 解析颜色
     border_color = parse_color(args.border_color)
