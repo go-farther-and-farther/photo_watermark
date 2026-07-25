@@ -908,6 +908,18 @@ def main():
         print(f"错误: 无效的输入路径 - {args.input}")
         sys.exit(1)
 
+    # 等待30秒后关闭（exe模式下使用）
+    import time
+    print()
+    print("=" * 50)
+    print("处理完成！程序将在30秒后自动关闭...")
+    print("按 Ctrl+C 可立即关闭")
+    print("=" * 50)
+    try:
+        time.sleep(30)
+    except KeyboardInterrupt:
+        print("\n用户中断，程序关闭")
+
 
 if __name__ == '__main__':
     main()
