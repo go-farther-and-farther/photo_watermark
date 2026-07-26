@@ -47,9 +47,9 @@ def load_ini_config() -> configparser.ConfigParser:
     if ini_path.exists():
         try:
             config.read(ini_path, encoding='utf-8')
-            print(f"✅ 已加载配置: {ini_path.name}")
+            print(f"[OK] 已加载配置: {ini_path.name}")
         except Exception as e:
-            print(f"⚠️ 配置文件读取失败: {e}")
+            print(f"[警告] 配置文件读取失败: {e}")
     return config
 
 
@@ -69,6 +69,39 @@ def get_config_value(section: str, key: str, fallback, value_type: str = 'str'):
         else:
             return _ini_config.get(section, key)
     return fallback
+
+
+def parse_color(color_str: str) -> Tuple[int, int, int]:
+    """解析颜色字符串（支持中文）"""
+    colors = {
+        'black': (0, 0, 0), 'white': (255, 255, 255),
+        'red': (255, 0, 0), 'green': (0, 128, 0), 'blue': (0, 0, 255),
+        'gray': (128, 128, 128), 'grey': (128, 128, 128),
+        '黑色': (0, 0, 0), '白色': (255, 255, 255),
+        '红色': (255, 0, 0), '绿色': (0, 128, 0), '蓝色': (0, 0, 255),
+        '灰色': (128, 128, 128),
+    }
+    color_str = color_str.lower().strip()
+    if color_str in colors:
+        return colors[color_str]
+    try:
+        parts = [int(x.strip()) for x in color_str.split(',')]
+        if len(parts) == 3 and all(0 <= x <= 255 for x in parts):
+            return tuple(parts)
+    except (ValueError, AttributeError):
+        pass
+    return (0, 0, 0)
+
+
+def parse_position(position_str: str) -> str:
+    """解析位置字符串（支持中文）"""
+    positions = {
+        '左上': 'top-left', '右上': 'top-right',
+        '左下': 'bottom-left', '右下': 'bottom-right',
+        'top-left': 'top-left', 'top-right': 'top-right',
+        'bottom-left': 'bottom-left', 'bottom-right': 'bottom-right',
+    }
+    return positions.get(position_str.strip(), 'bottom-right')
 
 
 # 导入配置（优先 .ini，其次 config.py，最后默认值）
@@ -321,7 +354,7 @@ def read_exif(image_path: str) -> Dict[str, str]:
         print(f"  参数: {exif_data.get('aperture', '-')} {exif_data.get('shutter', '-')} {exif_data.get('iso', '-')} {exif_data.get('focal_length', '-')}")
 
     except Exception as e:
-        print(f"⚠️ 未找到EXIF信息: {e}")
+        print(f"[警告] 未找到EXIF信息: {e}")
         print(f"   提示：手机照片可能需要先关闭'优化存储'功能")
 
     return exif_data
@@ -487,7 +520,7 @@ def format_exif_text(exif_data: Dict[str, str], show_all: bool = False) -> str:
     if show_all and exif_data.get('datetime'):
         parts.append(exif_data['datetime'])
 
-    return '  •  '.join(parts) if parts else ''
+    return '  -  '.join(parts) if parts else ''
 
 
 def apply_white_border(
@@ -609,7 +642,7 @@ def apply_white_border(
 
             new_image.paste(logo, (logo_x, logo_y), logo if logo.mode == 'RGBA' else None)
         except Exception as e:
-            print(f"  ⚠️ Logo加载失败: {e}")
+            print(f"  [警告] Logo加载失败: {e}")
             print(f"     提示：将使用文字水印替代")
 
     # 绘制日期时间（第二行右侧，参数下方）
@@ -936,7 +969,7 @@ def process_single_image(
 
         # 检查图片尺寸是否过小
         if image.width < 200 or image.height < 200:
-            print(f"  ⚠️ 图片尺寸过小，跳过: {image.width}x{image.height}")
+            print(f"  [警告] 图片尺寸过小，跳过: {image.width}x{image.height}")
             return False
 
         # 确保是RGB模式
@@ -1022,10 +1055,10 @@ def process_single_image(
         return True
 
     except Image.DecompressionBombError:
-        print(f"  ❌ 图片过大，内存不足: {input_path}")
+        print(f"  [失败] 图片过大，内存不足: {input_path}")
         return False
     except Exception as e:
-        print(f"  ❌ 处理失败: {e}")
+        print(f"  [失败] 处理失败: {e}")
         return False
 
 
@@ -1065,7 +1098,7 @@ def batch_process(
     image_files = sorted(set(image_files))
 
     if not image_files:
-        print(f"⚠️ 在 {input_dir} 中没有找到支持的图片文件")
+        print(f"[警告] 在 {input_dir} 中没有找到支持的图片文件")
         print(f"   支持格式: {', '.join(SUPPORTED_FORMATS)}")
         return 0, 0, 0
 
@@ -1114,72 +1147,6 @@ def batch_process(
     return success_count, len(image_files), elapsed_time
 
 
-def parse_color(color_str: str) -> Tuple[int, int, int]:
-    """
-    解析颜色字符串
-
-    Args:
-        color_str: 颜色字符串（如 'black', '黑色', '255,255,255'）
-
-    Returns:
-        RGB颜色元组
-    """
-    colors = {
-        'black': (0, 0, 0),
-        'white': (255, 255, 255),
-        'red': (255, 0, 0),
-        'green': (0, 128, 0),
-        'blue': (0, 0, 255),
-        'gray': (128, 128, 128),
-        'grey': (128, 128, 128),
-        '黑色': (0, 0, 0),
-        '白色': (255, 255, 255),
-        '红色': (255, 0, 0),
-        '绿色': (0, 128, 0),
-        '蓝色': (0, 0, 255),
-        '灰色': (128, 128, 128),
-    }
-
-    color_str = color_str.lower().strip()
-    if color_str in colors:
-        return colors[color_str]
-
-    # 尝试解析RGB格式
-    try:
-        parts = [int(x.strip()) for x in color_str.split(',')]
-        if len(parts) == 3 and all(0 <= x <= 255 for x in parts):
-            return tuple(parts)
-    except (ValueError, AttributeError):
-        pass
-
-    print(f"警告: 无法解析颜色 '{color_str}'，使用默认黑色")
-    return (0, 0, 0)
-
-
-def parse_position(position_str: str) -> str:
-    """
-    解析位置字符串（支持中文）
-
-    Args:
-        position_str: 位置字符串（如 '右下', 'bottom-right'）
-
-    Returns:
-        标准位置字符串
-    """
-    positions = {
-        '左上': 'top-left',
-        '右上': 'top-right',
-        '左下': 'bottom-left',
-        '右下': 'bottom-right',
-        'top-left': 'top-left',
-        'top-right': 'top-right',
-        'bottom-left': 'bottom-left',
-        'bottom-right': 'bottom-right',
-    }
-
-    return positions.get(position_str.strip(), 'bottom-right')
-
-
 def get_smart_style(image_path: str) -> str:
     """
     根据照片方向智能选择水印样式
@@ -1224,9 +1191,9 @@ def main():
         tips.append("DEFAULT_LOGO 未设置，将根据品牌自动匹配")
 
     if tips:
-        print("💡 提示（可在 config.py 中修改）:")
+        print("[提示] 提示（可在 config.py 中修改）:")
         for tip in tips:
-            print(f"   • {tip}")
+            print(f"   - {tip}")
         print()
 
     parser = argparse.ArgumentParser(
@@ -1333,7 +1300,7 @@ def main():
 
             # 提示可以设置默认路径
             if not DEFAULT_INPUT:
-                print("💡 提示: 在 config.py 中设置 DEFAULT_INPUT 可跳过此选择")
+                print("[提示] 提示: 在 config.py 中设置 DEFAULT_INPUT 可跳过此选择")
                 print()
 
             # 询问用户选择文件还是文件夹
@@ -1389,7 +1356,7 @@ def main():
     }
 
     # 显示当前使用的配置
-    print(f"📌 当前配置:")
+    print(f"[配置] 当前配置:")
     print(f"   样式: {args.style}")
     print(f"   输入: {input_path}")
     if args.text:
@@ -1449,9 +1416,9 @@ def main():
         if process_single_image(
             str(input_path), output_path, args.style, args.text, **kwargs
         ):
-            print(f"✅ 完成! 保存到: {output_path}")
+            print(f"[成功] 完成! 保存到: {output_path}")
         else:
-            print("❌ 处理失败!")
+            print("[失败] 处理失败!")
             sys.exit(1)
 
     elif input_path.is_dir():
@@ -1471,11 +1438,11 @@ def main():
 
         print("-" * 50)
         if success == total:
-            print(f"✅ 全部完成: {success}/{total} 张图片处理成功")
+            print(f"[成功] 全部完成: {success}/{total} 张图片处理成功")
         else:
-            print(f"⚠️  部分完成: {success}/{total} 张图片处理成功")
-        print(f"⏱️  用时: {elapsed_time:.1f} 秒")
-        print(f"📁 输出目录: {output_dir}")
+            print(f"[警告]  部分完成: {success}/{total} 张图片处理成功")
+        print(f"[用时]  用时: {elapsed_time:.1f} 秒")
+        print(f"[目录] 输出目录: {output_dir}")
 
         # 自动打开输出目录（Windows）
         if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
