@@ -136,7 +136,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 | Pentax | `pentax_logo.jpeg` |
 | Panasonic | `panasonic_logo.jpeg` |
 
-未匹配到的品牌默认使用 Nikon Logo。
+未匹配到的品牌不使用 Logo。
 
 ## 自定义配置
 

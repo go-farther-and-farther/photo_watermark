@@ -19,7 +19,7 @@ import os
 import configparser
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 try:
@@ -137,8 +137,6 @@ COLOR_LENS = parse_color(get_config_value('颜色设置', '白条镜头颜色', 
 COLOR_PARAMS = parse_color(get_config_value('颜色设置', '白条参数颜色', '30,30,30'))
 COLOR_DATE = parse_color(get_config_value('颜色设置', '白条日期颜色', '100,100,100'))
 BLUR_TEXT_COLOR = parse_color(get_config_value('颜色设置', '模糊文字颜色', '白色'))
-BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
-BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
 
 # 白条边框垂直对齐
 STRIP_VALIGN = get_config_value('白条边框', '垂直对齐', '中')
@@ -696,6 +694,22 @@ def apply_white_border(
             print(f"  [警告] Logo加载失败: {e}")
             print(f"     提示：将使用文字水印替代")
 
+    # 绘制自定义文字（如果有）
+    if custom_text:
+        custom_font = get_font(max(12, font_size - 2))
+        bbox = draw.textbbox((0, 0), custom_text, font=custom_font)
+        text_width = bbox[2] - bbox[0]
+        custom_x = right_x - text_width
+        # 放在日期下方
+        custom_y = margin_top + (font_size + LINE_SPACING) * 2
+        if custom_y + font_size < height + border_height:
+            draw.text(
+                (custom_x, custom_y),
+                custom_text,
+                fill=COLOR_DATE,
+                font=custom_font,
+            )
+
     # 绘制日期时间（第二行右侧，参数下方）
     if datetime_text:
         # 格式化日期时间显示 - 只显示日期，不显示时间
@@ -852,14 +866,10 @@ def apply_color_border(
     font_size = max(12, bottom_border // 3)
     font = get_font(font_size)
 
-    # 组合显示文本
-    exif_text = format_exif_text(exif_data)
-    display_parts = []
-    if exif_text:
-        display_parts.append(exif_text)
+    # 组合显示文本（使用模板）
+    display_text = format_template(TEMPLATE_BORDER, exif_data)
     if custom_text:
-        display_parts.append(custom_text)
-    display_text = '  |  '.join(display_parts)
+        display_text = f"{display_text} | {custom_text}" if display_text else custom_text
 
     if display_text:
         # 居中显示
@@ -955,41 +965,49 @@ def apply_blur_border(
     font_size = max(12, bottom_border // 5)
     font = get_font(font_size)
 
-    # 组合显示文本
-    params_text = get_params_text(exif_data)
+    # 使用模板格式化文本
+    line1_text = format_template(TEMPLATE_BLUR, exif_data)
+    line2_text = format_template(TEMPLATE_BLUR_LINE2, exif_data)
 
-    datetime_text = exif_data.get('datetime', '')
-    if datetime_text:
-        datetime_text = datetime_text.replace(':', '-', 2)[:10]
+    # 计算垂直起始位置
+    text_block_height = font_size * 2 + 8
+    y_start = height + border_size + (bottom_border - text_block_height) // 2
 
-    # 绘制拍摄参数（底部居中，第一行）
-    if params_text:
-        bbox = draw.textbbox((0, 0), params_text, font=font)
+    # 绘制第一行（拍摄参数）
+    if line1_text:
+        bbox = draw.textbbox((0, 0), line1_text, font=font)
         text_width = bbox[2] - bbox[0]
         x = (new_width - text_width) // 2
-        y = height + border_size + (bottom_border - font_size * 2 - 8) // 2
-
-        # 文字阴影
         if text_shadow:
             shadow_offset = max(1, font_size // 15)
-            draw.text((x + shadow_offset, y + shadow_offset), params_text,
+            draw.text((x + shadow_offset, y_start + shadow_offset), line1_text,
                       fill=(0, 0, 0, 180), font=font)
+        draw.text((x, y_start), line1_text, fill=text_color, font=font)
 
-        draw.text((x, y), params_text, fill=text_color, font=font)
-
-    # 绘制日期（底部居中，第二行）
-    if datetime_text:
-        bbox = draw.textbbox((0, 0), datetime_text, font=font)
+    # 绘制第二行（日期）
+    if line2_text:
+        bbox = draw.textbbox((0, 0), line2_text, font=font)
         text_width = bbox[2] - bbox[0]
         x = (new_width - text_width) // 2
-        y = height + border_size + (bottom_border - font_size * 2 - 8) // 2 + font_size + 6
-
+        y2 = y_start + font_size + 6
         if text_shadow:
             shadow_offset = max(1, font_size // 15)
-            draw.text((x + shadow_offset, y + shadow_offset), datetime_text,
+            draw.text((x + shadow_offset, y2 + shadow_offset), line2_text,
                       fill=(0, 0, 0, 180), font=font)
+        draw.text((x, y2), line2_text, fill=text_color, font=font)
 
-        draw.text((x, y), datetime_text, fill=text_color, font=font)
+    # 绘制自定义文字（如果有，放在第三行）
+    if custom_text:
+        custom_font = get_font(max(12, font_size - 2))
+        bbox = draw.textbbox((0, 0), custom_text, font=custom_font)
+        text_width = bbox[2] - bbox[0]
+        x = (new_width - text_width) // 2
+        y3 = y_start + (font_size + 6) * 2
+        if text_shadow:
+            shadow_offset = max(1, font_size // 15)
+            draw.text((x + shadow_offset, y3 + shadow_offset), custom_text,
+                      fill=(0, 0, 0, 180), font=custom_font)
+        draw.text((x, y3), custom_text, fill=text_color, font=custom_font)
 
     return new_image
 
@@ -1117,7 +1135,6 @@ def process_single_image(
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
         output_ext = Path(output_path).suffix
-        output_stem = Path(output_path).stem
 
         for i, single_style in enumerate(styles):
             # 为每个样式生成独立的文件名
@@ -1132,6 +1149,11 @@ def process_single_image(
             else:
                 # 单样式时，使用原始输出路径
                 style_output_path = output_path
+
+            # 检查是否覆盖已存在文件
+            if not OVERWRITE_EXISTING and Path(style_output_path).exists():
+                print(f"    [跳过] 文件已存在: {Path(style_output_path).name}")
+                continue
 
             # 应用样式（每次都从原图开始，不叠加）
             result = apply_single_style(image, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
@@ -1175,7 +1197,7 @@ def batch_process(
         **kwargs: 其他参数
 
     Returns:
-        (成功数量, 总数量)
+        (成功数量, 总数量, 用时秒数)
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -1209,6 +1231,9 @@ def batch_process(
     success_count = 0
     start_time = datetime.now()
 
+    # 解析样式列表（移到循环外，避免重复解析）
+    styles = [s.strip() for s in style.split(',') if s.strip()]
+
     # 使用进度条或普通循环
     if use_progress_bar:
         iterator = tqdm(image_files, desc="处理中", unit="张")
@@ -1216,9 +1241,6 @@ def batch_process(
         iterator = image_files
 
     for i, img_file in enumerate(iterator, 1):
-        # 解析样式列表
-        styles = [s.strip() for s in style.split(',') if s.strip()]
-
         # 为第一个样式生成输出路径（process_single_image会为多样式生成独立文件）
         first_style = styles[0] if styles else style
         output_name = OUTPUT_FILENAME_FORMAT.format(
@@ -1273,7 +1295,7 @@ def main():
     # 显示项目信息
     print("=" * 50)
     print("  Photo Watermark - 相机照片水印边框生成器")
-    print("  版本: v1.1.1")
+    print("  版本: v1.4.1")
     print("  项目: https://github.com/go-farther-and-farther/photo_watermark")
     print("=" * 50)
     print()
@@ -1325,9 +1347,8 @@ def main():
     )
     parser.add_argument(
         '-s', '--style',
-        choices=['strip', 'transparent', 'border', 'blur'],
         default=DEFAULT_STYLE,
-        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)',
+        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)，多样式用逗号分隔如 strip,blur',
     )
     parser.add_argument(
         '-t', '--text',
@@ -1436,6 +1457,13 @@ def main():
 
         except ImportError:
             print(f"错误: 未指定输入路径，请通过命令行参数或config.py设置DEFAULT_INPUT")
+            sys.exit(1)
+
+    # 验证样式参数
+    valid_styles = {'strip', 'transparent', 'border', 'blur'}
+    for s in args.style.split(','):
+        if s.strip() not in valid_styles:
+            print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")
             sys.exit(1)
 
     # 解析颜色（None表示使用config.py默认值）

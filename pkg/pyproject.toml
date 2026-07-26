@@ -4,12 +4,12 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "photo-watermark"
-version = "1.0.0"
+version = "1.4.1"
 description = "相机照片水印边框生成器 - 自动读取EXIF信息，生成专业水印边框"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "go-farther-and-farther"}
 ]
 requires-python = ">=3.6"
 classifiers = [
@@ -32,10 +32,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/photo-watermark"
-Documentation = "https://github.com/yourusername/photo-watermark#readme"
-Repository = "https://github.com/yourusername/photo-watermark"
-Issues = "https://github.com/yourusername/photo-watermark/issues"
+Homepage = "https://github.com/go-farther-and-farther/photo_watermark"
+Documentation = "https://github.com/go-farther-and-farther/photo_watermark#readme"
+Repository = "https://github.com/go-farther-and-farther/photo_watermark"
+Issues = "https://github.com/go-farther-and-farther/photo_watermark/issues"
 
 [project.scripts]
 photo-watermark = "photo_watermark:main"

@@ -2,13 +2,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="photo-watermark",
-    version="1.0.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    version="1.4.1",
+    author="go-farther-and-farther",
+    author_email="",
     description="相机照片水印边框生成器 - 自动读取EXIF信息，生成专业水印边框",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/photo-watermark",
+    url="https://github.com/go-farther-and-farther/photo_watermark",
     py_modules=["photo_watermark"],
     classifiers=[
         "Development Status :: 4 - Beta",

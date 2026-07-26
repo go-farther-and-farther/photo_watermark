@@ -33,12 +33,12 @@
 │           ┌──────────────────────────┐                   │
 │           │    水印样式分发           │                   │
 │           └─────────┬────────────────┘                   │
-│         ┌───────────┼───────────┐                        │
-│         ▼           ▼           ▼                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                │
-│  │  white   │ │transpa-  │ │  border  │                │
-│  │ 白底边框  │ │rent半透明│ │ 纯色边框  │                │
-│  └──────────┘ └──────────┘ └──────────┘                │
+│     ┌───────────┬───┴────┬───────────┐                   │
+│     ▼           ▼        ▼           ▼                   │
+│ ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐          │
+│ │  strip   │ │transpa-│ │ border │ │  blur  │          │
+│ │ 白底边框  │ │rent半透明│ │纯色边框│ │模糊边框 │          │
+│ └──────────┘ └────────┘ └────────┘ └────────┘          │
 │                          ▼                               │
 │                   Image.save() 输出                       │
 └─────────────────────────────────────────────────────────┘
@@ -52,8 +52,8 @@
 
 | 文件 | 用途 | 行数 |
 |------|------|------|
-| `photo_watermark.py` | 主程序，包含所有业务逻辑 | ~1000 |
-| `config.py` | 配置文件，所有可调参数 | ~80 |
+| `photo_watermark.py` | 主程序，包含所有业务逻辑 | ~1560 |
+| `config.py` | 配置文件，所有可调参数 | ~120 |
 | `logos/*.png/jpeg` | 品牌Logo文件 | - |
 | `pkg/setup.py` | 打包配置 | ~40 |
 | `pkg/pyproject.toml` | 打包元数据 | ~50 |
@@ -108,12 +108,14 @@ brand_logo_map = {
     'NIKON': 'nikon_logo.png',
     'CANON': 'canon_logo.png',
     'SONY': 'sony_logo.png',
-    'FUJIFILM': 'fuji_logo.png',
     'FUJI': 'fuji_logo.png',
-    'HASSELBLAD': 'hasselblad_logo.jpeg',
-    'OLYMPUS': 'olympus_logo.jpeg',
-    'PENTAX': 'pentax_logo.jpeg',
-    'PANASONIC': 'panasonic_logo.jpeg',
+    'HASSELBLAD': 'hasselblad_logo.png',
+    'OLYMPUS': 'olympus_logo.png',
+    'OM DIGITAL': 'olympus_logo.png',  # OM System（前身奥林巴斯）
+    'OM SYSTEM': 'olympus_logo.png',
+    'PENTAX': 'pentax_logo.png',
+    'RICOH': 'pentax_logo.png',        # 宾得已被理光收购
+    'PANASONIC': 'panasonic_logo.png',
 }
 ```
 
@@ -140,7 +142,7 @@ brand_logo_map = {
 
 ### 4. `apply_white_border(image, exif_data, custom_text, logo_path)`
 
-白底黑字边框样式（尼康/佳能风格）。
+白底黑字边框样式（strip 样式，尼康/佳能风格）。
 
 **布局：**
 ```
@@ -217,7 +219,7 @@ try:
     from config import *      # 优先加载 config.py
 except ImportError:
     # config.py 不存在时使用代码默认值
-    DEFAULT_STYLE = 'white'
+    DEFAULT_STYLE = 'strip'
     ...
 ```
 
@@ -257,7 +259,7 @@ def apply_color_border(border_color=None):
 | | `DEFAULT_OUTPUT` | 默认输出路径（空=自动） |
 | | `JPEG_QUALITY` | JPEG 质量 |
 | | `FONT_SIZE_RATIO` | 字体大小比例 |
-| **white** | `BORDER_HEIGHT_RATIO` | 边框高度 |
+| **strip** | `BORDER_HEIGHT_RATIO` | 边框高度 |
 | | `LEFT_MARGIN_RATIO` | 左侧边距 |
 | | `RIGHT_MARGIN_RATIO` | 右侧边距 |
 | | `LOGO_HEIGHT_RATIO` | Logo 高度 |
@@ -297,8 +299,8 @@ read_exif() ──► exif_data              │
     ▼                                  │         ▼
 ┌──────────────────────────────────────┼─────────┘
 │         样式分发                      │
-├──────────┬───────────┬───────────────┤
-│ white    │transparent│ border        │
+├──────────┬───────────┬──────────┬────────┤
+│ strip    │transparent│ border   │ blur   │
 │          │           │               │
 │ 左侧:    │ 位置计算   │ 四周边框      │
 │ 相机+镜头 │ 阴影绘制   │ 底部文字      │
@@ -423,7 +425,7 @@ exe 用户需要将以下文件放在 exe 同目录：
 
 4. **在 argparse 添加选项**
    ```python
-   parser.add_argument('-s', '--style', choices=['white', 'transparent', 'border', 'new_style'])
+   parser.add_argument('-s', '--style', choices=['strip', 'transparent', 'border', 'blur', 'new_style'])
    ```
 
 5. **更新 config.py 的 DEFAULT_STYLE 注释**
@@ -446,13 +448,14 @@ font_paths = [
 
 ```python
 # photo_watermark.py → read_exif()
-# 当前格式：文件创建时间
-ctime = os.path.getctime(image_path)
-exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%S')
-
-# 如需使用 EXIF 拍摄时间：
-# if 'EXIF DateTimeOriginal' in tags:
-#     exif_data['datetime'] = str(tags['EXIF DateTimeOriginal'])
+# 当前逻辑：优先 EXIF 拍摄时间，回退到文件创建时间
+for tag in ['EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime']:
+    if tag in tags:
+        exif_data['datetime'] = str(tags[tag]).strip()
+        break
+if not exif_data['datetime']:
+    ctime = os.path.getctime(image_path)
+    exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%S')
 ```
 
 ---
@@ -463,7 +466,7 @@ exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%
 2. **Logo 格式** — 支持 PNG 和 JPEG，PNG 需带 Alpha 通道才能透明
 3. **EXIF 读取** — 部分照片可能缺少 EXIF 信息，相关字段留空
 4. **内存占用** — 大尺寸照片处理时内存占用较高
-5. **日期来源** — 使用文件创建时间，非 EXIF 拍摄时间
+5. **日期来源** — 优先使用 EXIF 拍摄时间，缺失时回退到文件创建时间
 
 ---
 
@@ -476,5 +479,5 @@ exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%
 
 ---
 
-*文档版本：v1.1.0*
+*文档版本：v1.4.0*
 *最后更新：2026-07-26*
