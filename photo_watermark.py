@@ -78,11 +78,12 @@ except ImportError:
     BLUR_TEXT_COLOR = (255, 255, 255)
     BLUR_TEXT_SHADOW = True
     BLUR_CORNER_RADIUS = 0.05
-
-# blur 样式内部常量
-BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8  # 底部边框宽度倍数
-BLUR_BRIGHTNESS_FACTOR = 0.85       # 亮度降低因子
-BLUR_DOWNSAMPLE_FACTOR = 4          # 缩小倍数（1/4）
+    BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8
+    BLUR_BRIGHTNESS_FACTOR = 0.85
+    BLUR_DOWNSAMPLE_FACTOR = 4
+    # 输出设置
+    OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
+    OVERWRITE_EXISTING = False
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp'}
@@ -837,6 +838,11 @@ def process_single_image(
         # 读取图片
         image = Image.open(input_path)
 
+        # 检查图片尺寸是否过小
+        if image.width < 200 or image.height < 200:
+            print(f"  ⚠️ 图片尺寸过小，跳过: {image.width}x{image.height}")
+            return False
+
         # 确保是RGB模式
         if image.mode in ('RGBA', 'P'):
             image = image.convert('RGB')
@@ -919,8 +925,11 @@ def process_single_image(
 
         return True
 
+    except Image.DecompressionBombError:
+        print(f"  ❌ 图片过大，内存不足: {input_path}")
+        return False
     except Exception as e:
-        print(f"错误: 处理图片失败 - {e}")
+        print(f"  ❌ 处理失败: {e}")
         return False
 
 
@@ -967,8 +976,12 @@ def batch_process(
 
     success_count = 0
     for i, img_file in enumerate(image_files, 1):
-        # 生成输出文件名（包含样式名）
-        output_file = output_path / f"{img_file.stem}_{style}_watermark{img_file.suffix}"
+        # 使用配置的命名格式
+        output_name = OUTPUT_FILENAME_FORMAT.format(
+            name=img_file.stem,
+            style=style,
+        )
+        output_file = output_path / f"{output_name}{img_file.suffix}"
 
         print(f"[{i}/{len(image_files)}] 处理: {img_file.name}")
 
@@ -1117,6 +1130,11 @@ def main():
         default=DEFAULT_LOGO,
         help='Logo图片路径（留空则根据品牌自动匹配）',
     )
+    parser.add_argument(
+        '--preview',
+        action='store_true',
+        help='预览模式：显示效果但不保存文件',
+    )
 
     args = parser.parse_args()
 
@@ -1203,7 +1221,36 @@ def main():
     print(f"   输入: {input_path}")
     if args.text:
         print(f"   自定义文字: {args.text}")
+    if args.preview:
+        print(f"   模式: 预览（不保存）")
     print()
+
+    # 预览模式：只处理第一张图片并显示
+    if args.preview and input_path.is_file():
+        print("预览模式：显示效果但不保存")
+        # 读取图片
+        image = Image.open(input_path)
+        if image.mode in ('RGBA', 'P'):
+            image = image.convert('RGB')
+        exif_data = read_exif(str(input_path))
+        orientation = exif_data.get('orientation', 1)
+        if orientation != 1:
+            image = auto_rotate_image(image, orientation)
+
+        # 应用水印
+        if args.style == 'strip':
+            result = apply_white_border(image, exif_data, args.text, logo_path=args.logo)
+        elif args.style == 'transparent':
+            result = apply_transparent_watermark(image, args.text or format_exif_text(exif_data), **kwargs)
+        elif args.style == 'border':
+            result = apply_color_border(image, exif_data, args.text, **kwargs)
+        elif args.style == 'blur':
+            result = apply_blur_border(image, exif_data, args.text, **kwargs)
+
+        # 显示预览
+        result.show()
+        print("预览窗口已打开，关闭后程序继续")
+        sys.exit(0)
 
     # 判断是单张图片还是文件夹
     if input_path.is_file():
@@ -1211,7 +1258,12 @@ def main():
         if args.output:
             output_path = args.output
         else:
-            output_path = str(input_path.parent / f"{input_path.stem}_{args.style}_watermark{input_path.suffix}")
+            # 使用配置的命名格式
+            output_name = OUTPUT_FILENAME_FORMAT.format(
+                name=input_path.stem,
+                style=args.style,
+            )
+            output_path = str(input_path.parent / f"{output_name}{input_path.suffix}")
 
         print(f"处理图片: {input_path.name}")
         if process_single_image(

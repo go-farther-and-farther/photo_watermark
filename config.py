@@ -97,3 +97,16 @@ BLUR_TEXT_SHADOW = True
 
 # 圆角半径（相对于图片宽度），0 表示无圆角
 BLUR_CORNER_RADIUS = 0.03
+
+# blur 样式内部参数
+BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8  # 底部边框宽度倍数
+BLUR_BRIGHTNESS_FACTOR = 0.85       # 亮度降低因子（0.8-0.95）
+BLUR_DOWNSAMPLE_FACTOR = 4          # 缩小倍数（越大越快，但质量略降）
+
+# ==================== 输出设置 ====================
+
+# 输出文件命名格式（支持变量：{name}, {style}）
+OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
+
+# 是否覆盖已存在的文件
+OVERWRITE_EXISTING = False
