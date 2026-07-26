@@ -697,21 +697,20 @@ def apply_white_border(
             print(f"  [警告] Logo加载失败: {e}")
             print(f"     提示：将使用文字水印替代")
 
-    # 绘制自定义文字（如果有）
+    # 绘制自定义文字（如果有）- 居中放在边框底部
     if custom_text:
         custom_font = get_font(max(12, font_size - 2))
         bbox = draw.textbbox((0, 0), custom_text, font=custom_font)
-        text_width = bbox[2] - bbox[0]
-        custom_x = right_x - text_width
-        # 放在日期下方
-        custom_y = margin_top + (font_size + LINE_SPACING) * 2
-        if custom_y + font_size < height + border_height:
-            draw.text(
-                (custom_x, custom_y),
-                custom_text,
-                fill=COLOR_DATE,
-                font=custom_font,
-            )
+        cw = bbox[2] - bbox[0]
+        ch = bbox[3] - bbox[1]
+        cx = (width - cw) // 2
+        cy = height + border_height - ch - 4
+        draw.text(
+            (cx, cy),
+            custom_text,
+            fill=COLOR_DATE,
+            font=custom_font,
+        )
 
     # 绘制日期时间（第二行右侧，参数下方）
     if datetime_text:
