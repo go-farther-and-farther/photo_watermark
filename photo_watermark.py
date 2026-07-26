@@ -717,7 +717,7 @@ def apply_blur_border(
 
     # ========== 绘制文字 ==========
     draw = ImageDraw.Draw(new_image)
-    font_size = max(14, bottom_border // 4)
+    font_size = max(12, bottom_border // 5)
     font = get_font(font_size)
 
     # 组合显示文本
