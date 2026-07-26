@@ -16,10 +16,16 @@
 import argparse
 import sys
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
-import exifread
+
+try:
+    import exifread
+except ImportError:
+    print("错误: 请安装 exifread 库 - pip install exifread")
+    sys.exit(1)
 
 
 def get_base_dir() -> Path:
@@ -73,6 +79,10 @@ except ImportError:
     BLUR_TEXT_SHADOW = True
     BLUR_CORNER_RADIUS = 0.05
 
+# blur 样式内部常量
+BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8  # 底部边框宽度倍数
+BLUR_BRIGHTNESS_FACTOR = 0.85       # 亮度降低因子
+BLUR_DOWNSAMPLE_FACTOR = 4          # 缩小倍数（1/4）
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp'}
@@ -174,7 +184,7 @@ def read_exif(image_path: str) -> Dict[str, str]:
                         exif_data['aperture'] = f"F{int(f_value)}"
                     else:
                         exif_data['aperture'] = f"F{f_value:.1f}"
-            except:
+            except (ValueError, ZeroDivisionError):
                 exif_data['aperture'] = str(aperture)
 
         # 快门速度
@@ -202,8 +212,6 @@ def read_exif(image_path: str) -> Dict[str, str]:
                 exif_data['focal_length'] = f"{focal}mm"
 
         # 拍摄时间 - 优先从EXIF读取，fallback到文件创建时间
-        import os
-        from datetime import datetime
         for tag in ['EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime']:
             if tag in tags:
                 exif_data['datetime'] = str(tags[tag]).strip()
@@ -223,6 +231,9 @@ def read_exif(image_path: str) -> Dict[str, str]:
     return exif_data
 
 
+# 字体缓存
+_font_cache = {}
+
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """
     获取字体，优先使用系统字体
@@ -234,9 +245,14 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     Returns:
         字体对象
     """
-    # Windows系统字体路径
+    # 检查缓存
+    cache_key = (size, bold)
+    if cache_key in _font_cache:
+        return _font_cache[cache_key]
+
+    # Windows系统字体路径（粗体用 msyhbd.ttc）
     font_paths = [
-        'C:/Windows/Fonts/msyh.ttc',      # 微软雅黑
+        'C:/Windows/Fonts/msyhbd.ttc' if bold else 'C:/Windows/Fonts/msyh.ttc',  # 微软雅黑
         'C:/Windows/Fonts/simhei.ttf',     # 黑体
         'C:/Windows/Fonts/simsun.ttc',     # 宋体
         'C:/Windows/Fonts/arial.ttf',      # Arial
@@ -244,12 +260,16 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
     for font_path in font_paths:
         try:
-            return ImageFont.truetype(font_path, size)
-        except:
+            font = ImageFont.truetype(font_path, size)
+            _font_cache[cache_key] = font
+            return font
+        except (IOError, OSError):
             continue
 
     # 如果都失败，使用默认字体
-    return ImageFont.load_default()
+    default_font = ImageFont.load_default()
+    _font_cache[cache_key] = default_font
+    return default_font
 
 
 def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
@@ -328,6 +348,23 @@ def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
     return image
 
 
+def get_params_text(exif_data: Dict[str, str]) -> str:
+    """
+    提取拍摄参数文本（焦距 光圈 快门 ISO）
+
+    Args:
+        exif_data: EXIF数据字典
+
+    Returns:
+        参数文本，如 "120mm F5.6 1/125s ISO1100"
+    """
+    params = []
+    for key in ['focal_length', 'aperture', 'shutter', 'iso']:
+        if exif_data.get(key):
+            params.append(exif_data[key])
+    return ' '.join(params)
+
+
 def format_exif_text(exif_data: Dict[str, str], show_all: bool = False) -> str:
     """
     格式化EXIF信息为显示文本
@@ -346,18 +383,9 @@ def format_exif_text(exif_data: Dict[str, str], show_all: bool = False) -> str:
         parts.append(exif_data['camera'])
 
     # 拍摄参数
-    params = []
-    if exif_data.get('focal_length'):
-        params.append(exif_data['focal_length'])
-    if exif_data.get('aperture'):
-        params.append(exif_data['aperture'])
-    if exif_data.get('shutter'):
-        params.append(exif_data['shutter'])
-    if exif_data.get('iso'):
-        params.append(exif_data['iso'])
-
-    if params:
-        parts.append(' | '.join(params))
+    params_text = get_params_text(exif_data)
+    if params_text:
+        parts.append(params_text)
 
     # 拍摄时间
     if show_all and exif_data.get('datetime'):
@@ -441,17 +469,7 @@ def apply_white_border(
 
     # ========== 右侧：参数 + Logo + 日期 ==========
     # 拍摄参数（焦距 光圈 快门 ISO）
-    params_parts = []
-    if exif_data.get('focal_length'):
-        params_parts.append(exif_data['focal_length'])
-    if exif_data.get('aperture'):
-        params_parts.append(exif_data['aperture'])
-    if exif_data.get('shutter'):
-        params_parts.append(exif_data['shutter'])
-    if exif_data.get('iso'):
-        params_parts.append(exif_data['iso'])
-
-    params_text = ' '.join(params_parts) if params_parts else ''
+    params_text = get_params_text(exif_data)
 
     # 日期时间
     datetime_text = exif_data.get('datetime', '')
@@ -710,7 +728,7 @@ def apply_blur_border(
 
     width, height = image.size
     border_size = int(width * border_ratio)
-    bottom_border = int(width * border_ratio * 1.8)  # 底部更宽，放文字
+    bottom_border = int(width * border_ratio * BLUR_BOTTOM_RATIO_MULTIPLIER)  # 底部更宽，放文字
 
     # 计算新图片尺寸
     new_width = width + 2 * border_size
@@ -719,8 +737,8 @@ def apply_blur_border(
     # ========== 创建模糊背景 ==========
 
     # 1. 先把原图缩小到 1/4（像素变 1/16，模糊速度快 16 倍）
-    small_w = width // 4
-    small_h = height // 4
+    small_w = width // BLUR_DOWNSAMPLE_FACTOR
+    small_h = height // BLUR_DOWNSAMPLE_FACTOR
     small_image = image.resize((small_w, small_h), Image.Resampling.LANCZOS)
 
     # 2. 对小图做高斯模糊（半径可以大一点，因为图小）
@@ -734,7 +752,7 @@ def apply_blur_border(
 
     # 5. 稍微降低亮度，让边框暗一点，文字更清晰
     from PIL import ImageEnhance
-    bg_image = ImageEnhance.Brightness(bg_image).enhance(0.85)
+    bg_image = ImageEnhance.Brightness(bg_image).enhance(BLUR_BRIGHTNESS_FACTOR)
 
     # 6. 给原图加圆角
     corner_radius = int(width * BLUR_CORNER_RADIUS)  # 相对于图片宽度
@@ -757,16 +775,7 @@ def apply_blur_border(
     font = get_font(font_size)
 
     # 组合显示文本
-    params_parts = []
-    if exif_data.get('focal_length'):
-        params_parts.append(exif_data['focal_length'])
-    if exif_data.get('aperture'):
-        params_parts.append(exif_data['aperture'])
-    if exif_data.get('shutter'):
-        params_parts.append(exif_data['shutter'])
-    if exif_data.get('iso'):
-        params_parts.append(exif_data['iso'])
-    params_text = ' '.join(params_parts)
+    params_text = get_params_text(exif_data)
 
     datetime_text = exif_data.get('datetime', '')
     if datetime_text:
@@ -846,13 +855,19 @@ def process_single_image(
         if logo_path and not Path(logo_path).exists():
             # logo_path 不是有效路径，尝试当作品牌名匹配
             logo_path = get_logo_by_brand(logo_path)
-            print(f"  指定Logo: {Path(logo_path).name}")
+            if logo_path:
+                print(f"  指定Logo: {Path(logo_path).name}")
+            else:
+                print("  未找到匹配的品牌Logo")
         elif not logo_path:
             # logo_path 为空，根据品牌自动匹配
             brand = exif_data.get('brand', '')
             if brand:
                 logo_path = get_logo_by_brand(brand)
-                print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
+                if logo_path:
+                    print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
+                else:
+                    print(f"  未找到品牌Logo: {brand}")
 
         # 根据样式应用水印
         if style == 'strip':
@@ -997,7 +1012,7 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
         parts = [int(x.strip()) for x in color_str.split(',')]
         if len(parts) == 3 and all(0 <= x <= 255 for x in parts):
             return tuple(parts)
-    except:
+    except (ValueError, AttributeError):
         pass
 
     print(f"警告: 无法解析颜色 '{color_str}'，使用默认黑色")
