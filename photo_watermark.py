@@ -264,13 +264,13 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
         'CANON': 'canon_logo.png',
         'SONY': 'sony_logo.png',
         'FUJI': 'fuji_logo.png',
-        'HASSELBLAD': 'hasselblad_logo.jpeg',
-        'OLYMPUS': 'olympus_logo.jpeg',
-        'OM DIGITAL': 'olympus_logo.jpeg',  # OM System（前身奥林巴斯）
-        'OM SYSTEM': 'olympus_logo.jpeg',   # OM System
-        'PENTAX': 'pentax_logo.jpeg',
-        'RICOH': 'pentax_logo.jpeg',        # 宾得已被理光收购
-        'PANASONIC': 'panasonic_logo.jpeg',
+        'HASSELBLAD': 'hasselblad_logo.png',
+        'OLYMPUS': 'olympus_logo.png',
+        'OM DIGITAL': 'olympus_logo.png',  # OM System（前身奥林巴斯）
+        'OM SYSTEM': 'olympus_logo.png',   # OM System
+        'PENTAX': 'pentax_logo.png',
+        'RICOH': 'pentax_logo.png',        # 宾得已被理光收购
+        'PANASONIC': 'panasonic_logo.png',
     }
 
     # 清理品牌名称
