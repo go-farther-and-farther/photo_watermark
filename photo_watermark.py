@@ -131,7 +131,7 @@ TEMPLATE_BLUR_LINE2 = get_config_value('文字模板', '模糊第二行格式', 
 FONT_PATH = get_config_value('字体设置', '字体路径', '')
 
 # 颜色设置
-COLOR_BORDER_BG = parse_color(get_config_value('颜色设置', '白条背景', '白色'))
+COLOR_BORDER = parse_color(get_config_value('颜色设置', '白条背景', '白色'))
 COLOR_CAMERA = parse_color(get_config_value('颜色设置', '白条相机颜色', '30,30,30'))
 COLOR_LENS = parse_color(get_config_value('颜色设置', '白条镜头颜色', '120,120,120'))
 COLOR_PARAMS = parse_color(get_config_value('颜色设置', '白条参数颜色', '30,30,30'))
@@ -208,34 +208,7 @@ if 'OUTPUT_FILENAME_FORMAT' not in dir():
     OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
 if 'OVERWRITE_EXISTING' not in dir():
     OVERWRITE_EXISTING = False
-    COLOR_CAMERA = (30, 30, 30)
-    COLOR_LENS = (120, 120, 120)
-    COLOR_PARAMS = (30, 30, 30)
-    COLOR_DATE = (100, 100, 100)
-    COLOR_BORDER = (255, 255, 255)
-    # transparent 样式
-    TRANSPARENT_POSITION = 'bottom-right'
-    TRANSPARENT_OPACITY = 128
-    TRANSPARENT_FONT_RATIO = 0.03
-    TRANSPARENT_TEXT_COLOR = (255, 255, 255)
-    TRANSPARENT_MARGIN_RATIO = 0.02
-    # border 样式
-    BORDER_FRAME_COLOR = (0, 0, 0)
-    BORDER_TEXT_COLOR = (255, 255, 255)
-    BORDER_SIDE_RATIO = 0.04
-    BORDER_BOTTOM_RATIO = 0.08
-    # blur 样式（模糊边框）
-    BLUR_BORDER_RATIO = 0.06
-    BLUR_INTENSITY = 15
-    BLUR_TEXT_COLOR = (255, 255, 255)
-    BLUR_TEXT_SHADOW = True
-    BLUR_CORNER_RADIUS = 0.05
-    BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8
-    BLUR_BRIGHTNESS_FACTOR = 0.85
-    BLUR_DOWNSAMPLE_FACTOR = 4
-    # 输出设置
-    OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
-    OVERWRITE_EXISTING = False
+if 'AUTO_OPEN_OUTPUT' not in dir():
     AUTO_OPEN_OUTPUT = True
 
 # 支持的图片格式
@@ -347,6 +320,9 @@ def read_exif(image_path: str) -> Dict[str, str]:
             if hasattr(shutter, 'num') and hasattr(shutter, 'den'):
                 if shutter.num == 1:
                     exif_data['shutter'] = f"1/{shutter.den}s"
+                elif shutter.den == 1:
+                    # 快门速度 >= 1秒，显示为整数秒
+                    exif_data['shutter'] = f"{shutter.num}s"
                 else:
                     exif_data['shutter'] = f"{shutter.num}/{shutter.den}s"
             else:
@@ -1039,8 +1015,10 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             logo_path=logo_path,
         )
     elif style == 'transparent':
+        # 使用模板格式化文字
+        text = custom_text or format_template(TEMPLATE_TRANSPARENT, exif_data)
         return apply_transparent_watermark(
-            image, custom_text or format_exif_text(exif_data),
+            image, text,
             position=kwargs.get('position', ''),
             opacity=kwargs.get('opacity', 0),
             font_ratio=kwargs.get('font_ratio', 0.0),
@@ -1185,7 +1163,7 @@ def batch_process(
     style: str = 'strip',
     custom_text: str = '',
     **kwargs,
-) -> Tuple[int, int]:
+) -> Tuple[int, int, float]:
     """
     批量处理文件夹中的图片
 
