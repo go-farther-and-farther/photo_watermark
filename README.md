@@ -14,10 +14,11 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **三种水印样式**
-  - `white` — 白底黑字边框（默认，尼康/佳能风格）
+- **四种水印样式**
+  - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
+  - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
 
 - **支持批量处理**
   - 支持整个文件夹批量处理
@@ -82,14 +83,17 @@ photo_watermark.exe ./photos/ -o ./output/
 ### 选择水印样式
 
 ```bash
-# 白底黑字边框（默认）
-photo_watermark.exe input.jpg --style white
+# 白底黑字条形边框（默认）
+photo_watermark.exe input.jpg --style strip
 
 # 半透明水印
 photo_watermark.exe input.jpg --style transparent --position bottom-right
 
 # 纯色边框
 photo_watermark.exe input.jpg --style border --border-color black
+
+# 模糊边框（推荐，效果自然）
+photo_watermark.exe input.jpg --style blur
 ```
 
 ### 自定义文字
@@ -108,7 +112,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 |------|------|--------|
 | `input` | 输入图片或文件夹路径 | `config.py` 配置（留空则弹出选择） |
 | `-o, --output` | 输出路径 | `config.py` 配置（留空则自动命名） |
-| `-s, --style` | 边框样式：`white` / `transparent` / `border` | `config.py` 配置 |
+| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` | `config.py` 配置 |
 | `-t, --text` | 自定义水印文字 | 无 |
 | `-p, --position` | 半透明水印位置：`top-left` / `top-right` / `bottom-left` / `bottom-right` | `config.py` 配置 |
 | `--border-color` | 边框颜色（`black`/`white`/`gray` 或 RGB 如 `255,255,255`） | `config.py` 配置 |
@@ -141,7 +145,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 ### 通用设置
 
 ```python
-DEFAULT_STYLE = 'white'         # 默认水印样式：white / transparent / border
+DEFAULT_STYLE = 'strip'         # 默认水印样式：strip / transparent / border / blur
 DEFAULT_INPUT = ''              # 默认输入路径（留空则每次弹出选择对话框）
 DEFAULT_OUTPUT = ''             # 默认输出路径（留空则在输入路径同级创建output文件夹）
 JPEG_QUALITY = 95               # JPEG输出质量 (1-100)
@@ -153,9 +157,9 @@ FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
 | 配置项 | 留空 `''` | 设置路径 |
 |--------|-----------|----------|
 | `DEFAULT_INPUT` | 每次运行弹出文件选择对话框 | 直接使用该路径，不弹窗 |
-| `DEFAULT_OUTPUT` | 单张图片：`{原名}_watermark.{ext}`；文件夹：创建 `watermark_output` | 输出到指定目录 |
+| `DEFAULT_OUTPUT` | 单张图片：`{原名}_{样式}_watermark.{ext}`；文件夹：创建 `watermark_output` | 输出到指定目录 |
 
-### white 样式配置（白底黑字边框）
+### strip 样式配置（白底黑字条形边框）
 
 ```python
 BORDER_HEIGHT_RATIO = 0.08      # 边框高度（相对于图片高度）
@@ -197,11 +201,21 @@ BORDER_SIDE_RATIO = 0.04               # 左右两侧边框宽度比例
 BORDER_BOTTOM_RATIO = 0.08             # 底部边框宽度比例
 ```
 
+### blur 样式配置（模糊边框）
+
+```python
+BLUR_BORDER_RATIO = 0.06               # 边框宽度比例（相对于图片宽度）
+BLUR_INTENSITY = 15                    # 模糊强度（像素），推荐 10-30
+BLUR_TEXT_COLOR = (255, 255, 255)       # 文字颜色
+BLUR_TEXT_SHADOW = True                 # 是否添加文字阴影
+BLUR_CORNER_RADIUS = 0.05              # 圆角半径（相对于图片宽度），0 无圆角
+```
+
 **注意：exe用户需要将 `config.py` 和 `logos/` 文件夹放在exe同目录下。**
 
 ## 效果预览
 
-### white 样式（白底黑字边框）
+### strip 样式（白底黑字条形边框）
 
 ```
 ┌──────────────────────────────────────┐
@@ -233,6 +247,20 @@ BORDER_BOTTOM_RATIO = 0.08             # 底部边框宽度比例
 │ │                                  │ │
 │ └──────────────────────────────────┘ │
 │        拍摄参数 | 自定义文字         │
+└──────────────────────────────────────┘
+```
+
+### blur 样式（模糊边框）
+
+```
+┌──────────────────────────────────────┐
+│  ╭────────────────────────────╮      │
+│  │                            │      │
+│  │       原图（圆角）          │ 模糊 │
+│  │                            │ 边框 │
+│  ╰────────────────────────────╯      │
+│        120mm F5.6 1/125 ISO1100      │
+│            2026-07-26                 │
 └──────────────────────────────────────┘
 ```
 

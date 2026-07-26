@@ -36,7 +36,7 @@ try:
     from config import *
 except ImportError:
     # 默认配置（如果config.py不存在）
-    DEFAULT_STYLE = 'white'
+    DEFAULT_STYLE = 'strip'
     DEFAULT_LOGO = ''
     DEFAULT_INPUT = ''
     DEFAULT_OUTPUT = ''
@@ -67,10 +67,11 @@ except ImportError:
     BORDER_SIDE_RATIO = 0.04
     BORDER_BOTTOM_RATIO = 0.08
     # blur 样式（模糊边框）
-    BLUR_BORDER_RATIO = 0.08
-    BLUR_INTENSITY = 50
+    BLUR_BORDER_RATIO = 0.06
+    BLUR_INTENSITY = 15
     BLUR_TEXT_COLOR = (255, 255, 255)
     BLUR_TEXT_SHADOW = True
+    BLUR_CORNER_RADIUS = 0.05
 
 
 # 支持的图片格式
@@ -358,7 +359,7 @@ def apply_white_border(
     logo_path: str = '',
 ) -> Image.Image:
     """
-    应用白底黑字边框样式（尼康/佳能风格）
+    应用白底黑字条形边框样式（尼康/佳能风格）
 
     布局：
     - 左上：镜头型号
@@ -723,7 +724,7 @@ def apply_blur_border(
     bg_image = ImageEnhance.Brightness(bg_image).enhance(0.85)
 
     # 6. 给原图加圆角
-    corner_radius = int(border_size * 1.5)  # 圆角半径
+    corner_radius = int(width * BLUR_CORNER_RADIUS)  # 相对于图片宽度
     corner_mask = Image.new('L', (width, height), 0)
     mask_draw = ImageDraw.Draw(corner_mask)
     mask_draw.rounded_rectangle(
@@ -793,7 +794,7 @@ def apply_blur_border(
 def process_single_image(
     input_path: str,
     output_path: str,
-    style: str = 'white',
+    style: str = 'strip',
     custom_text: str = '',
     **kwargs,
 ) -> bool:
@@ -803,7 +804,7 @@ def process_single_image(
     Args:
         input_path: 输入图片路径
         output_path: 输出图片路径
-        style: 边框样式（white, transparent, border）
+        style: 边框样式（strip, transparent, border, blur）
         custom_text: 自定义文字
         **kwargs: 其他参数
 
@@ -836,7 +837,7 @@ def process_single_image(
                 print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
 
         # 根据样式应用水印
-        if style == 'white':
+        if style == 'strip':
             result = apply_white_border(
                 image, exif_data, custom_text,
                 logo_path=logo_path,
@@ -893,7 +894,7 @@ def process_single_image(
 def batch_process(
     input_dir: str,
     output_dir: str,
-    style: str = 'white',
+    style: str = 'strip',
     custom_text: str = '',
     **kwargs,
 ) -> Tuple[int, int]:
@@ -933,8 +934,8 @@ def batch_process(
 
     success_count = 0
     for i, img_file in enumerate(image_files, 1):
-        # 生成输出文件名
-        output_file = output_path / f"{img_file.stem}_watermark{img_file.suffix}"
+        # 生成输出文件名（包含样式名）
+        output_file = output_path / f"{img_file.stem}_{style}_watermark{img_file.suffix}"
 
         print(f"[{i}/{len(image_files)}] 处理: {img_file.name}")
 
@@ -1014,8 +1015,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 白底黑字边框样式
-  python photo_watermark.py input.jpg --style white --text "©摄影师"
+  # 白底黑字条形边框样式
+  python photo_watermark.py input.jpg --style strip --text "©摄影师"
 
   # 半透明水印
   python photo_watermark.py input.jpg --style transparent --position bottom-right
@@ -1024,7 +1025,7 @@ def main():
   python photo_watermark.py input.jpg --style border --border-color black --text "©摄影师"
 
   # 批量处理
-  python photo_watermark.py ./photos/ --style white --text "©摄影师" --output ./output/
+  python photo_watermark.py ./photos/ --style strip --text "©摄影师" --output ./output/
         """,
     )
 
@@ -1041,9 +1042,9 @@ def main():
     )
     parser.add_argument(
         '-s', '--style',
-        choices=['white', 'transparent', 'border', 'blur'],
+        choices=['strip', 'transparent', 'border', 'blur'],
         default=DEFAULT_STYLE,
-        help='边框样式: white(白底黑字), transparent(半透明), border(纯色边框)',
+        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)',
     )
     parser.add_argument(
         '-t', '--text',
@@ -1177,7 +1178,7 @@ def main():
         if args.output:
             output_path = args.output
         else:
-            output_path = str(input_path.parent / f"{input_path.stem}_watermark{input_path.suffix}")
+            output_path = str(input_path.parent / f"{input_path.stem}_{args.style}_watermark{input_path.suffix}")
 
         print(f"处理图片: {input_path.name}")
         if process_single_image(
