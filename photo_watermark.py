@@ -1129,30 +1129,45 @@ def process_single_image(
                 else:
                     print(f"  未找到品牌Logo: {brand}")
 
-        # 解析样式列表（支持逗号分隔多选）
+        # 解析样式列表（支持逗号分隔多选，分别输出）
         styles = [s.strip() for s in style.split(',') if s.strip()]
 
-        # 按顺序应用每个样式
-        result = image
         # 从kwargs中移除logo_path，避免重复传递
         kwargs_clean = {k: v for k, v in kwargs.items() if k != 'logo_path'}
-        for i, single_style in enumerate(styles):
-            if len(styles) > 1:
-                print(f"  应用样式 [{i+1}/{len(styles)}]: {single_style}")
-            result = apply_single_style(result, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
 
-        # 保存图片
+        # 为每个样式分别生成文件
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_ext = Path(output_path).suffix
+        output_stem = Path(output_path).stem
 
-        # 根据输出格式选择保存参数
-        output_ext = Path(output_path).suffix.lower()
-        if output_ext in ('.jpg', '.jpeg'):
-            result.save(output_path, 'JPEG', quality=kwargs.get('quality', JPEG_QUALITY))
-        elif output_ext == '.png':
-            result.save(output_path, 'PNG')
-        else:
-            result.save(output_path)
+        for i, single_style in enumerate(styles):
+            # 为每个样式生成独立的文件名
+            if len(styles) > 1:
+                # 多样式时，文件名包含样式名
+                style_output_name = OUTPUT_FILENAME_FORMAT.format(
+                    name=Path(input_path).stem,
+                    style=single_style,
+                )
+                style_output_path = output_dir / f"{style_output_name}{output_ext}"
+                print(f"  应用样式 [{i+1}/{len(styles)}]: {single_style}")
+            else:
+                # 单样式时，使用原始输出路径
+                style_output_path = output_path
+
+            # 应用样式（每次都从原图开始，不叠加）
+            result = apply_single_style(image, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
+
+            # 保存图片
+            if output_ext.lower() in ('.jpg', '.jpeg'):
+                result.save(str(style_output_path), 'JPEG', quality=kwargs.get('quality', JPEG_QUALITY))
+            elif output_ext.lower() == '.png':
+                result.save(str(style_output_path), 'PNG')
+            else:
+                result.save(str(style_output_path))
+
+            if len(styles) > 1:
+                print(f"    -> 保存到: {style_output_path.name}")
 
         return True
 
