@@ -1238,10 +1238,14 @@ def batch_process(
         iterator = image_files
 
     for i, img_file in enumerate(iterator, 1):
-        # 使用配置的命名格式
+        # 解析样式列表
+        styles = [s.strip() for s in style.split(',') if s.strip()]
+
+        # 为第一个样式生成输出路径（process_single_image会为多样式生成独立文件）
+        first_style = styles[0] if styles else style
         output_name = OUTPUT_FILENAME_FORMAT.format(
             name=img_file.stem,
-            style=style,
+            style=first_style,
         )
         output_file = output_path / f"{output_name}{img_file.suffix}"
 
@@ -1252,8 +1256,6 @@ def batch_process(
             str(img_file), str(output_file), style, custom_text, **kwargs
         ):
             success_count += 1
-            if not use_progress_bar:
-                print(f"  -> 保存到: {output_file.name}")
         else:
             if not use_progress_bar:
                 print(f"  -> 处理失败")
