@@ -10,10 +10,10 @@ DEFAULT_STYLE = 'white'
 DEFAULT_LOGO = ''
 
 # 默认输入路径（留空则每次弹出选择对话框）
-DEFAULT_INPUT = ''
+DEFAULT_INPUT = './input'
 
 # 默认输出路径（留空则在输入路径同级创建 output 文件夹）
-DEFAULT_OUTPUT = ''
+DEFAULT_OUTPUT = './output'
 
 # JPEG输出质量 (1-100)
 JPEG_QUALITY = 95

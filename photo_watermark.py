@@ -463,6 +463,17 @@ def apply_white_border(
             # Logo位置（参数左侧）
             logo_x = params_x - logo_width - logo_params_spacing
             logo_y = height + (border_height - logo_height) // 2
+
+            # 调试输出
+            print(f"  Logo尺寸: {logo_width}x{logo_height}")
+            print(f"  Logo位置: ({logo_x}, {logo_y})")
+            print(f"  参数位置: params_x={params_x}, spacing={logo_params_spacing}")
+
+            # 确保logo不会超出左边界
+            if logo_x < left_margin:
+                print(f"  警告: Logo位置超出左边界，调整到左边距")
+                logo_x = left_margin
+
             new_image.paste(logo, (logo_x, logo_y), logo if logo.mode == 'RGBA' else None)
         except Exception as e:
             print(f"  警告: 加载logo失败 - {e}")
