@@ -704,13 +704,25 @@ def apply_blur_border(
 
     # ========== 创建模糊背景 ==========
 
-    # 1. 把原图放大到新尺寸（覆盖边框区域）
-    bg_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    # 1. 先把原图缩小到 1/4（像素变 1/16，模糊速度快 16 倍）
+    small_w = width // 4
+    small_h = height // 4
+    small_image = image.resize((small_w, small_h), Image.Resampling.LANCZOS)
 
-    # 2. 对放大后的图片做高斯模糊
-    bg_image = bg_image.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+    # 2. 对小图做高斯模糊（半径可以大一点，因为图小）
+    small_blur = small_image.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
 
-    # 3. 把清晰原图贴到中间
+    # 3. 把模糊的小图放大到目标尺寸（放大本身就带模糊效果）
+    bg_image = small_blur.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    # 4. 再轻微模糊一次，消除放大锯齿
+    bg_image = bg_image.filter(ImageFilter.GaussianBlur(radius=8))
+
+    # 5. 稍微降低亮度，让边框暗一点，文字更清晰
+    from PIL import ImageEnhance
+    bg_image = ImageEnhance.Brightness(bg_image).enhance(0.85)
+
+    # 6. 把清晰原图贴到中间
     bg_image.paste(image, (border_size, border_size))
 
     new_image = bg_image

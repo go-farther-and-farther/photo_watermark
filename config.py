@@ -86,8 +86,8 @@ BORDER_BOTTOM_RATIO = 0.08
 # 边框宽度比例（相对于图片宽度）
 BLUR_BORDER_RATIO = 0.06
 
-# 模糊强度（像素），值越大越模糊，推荐 15-40，太大处理慢
-BLUR_INTENSITY = 20
+# 模糊强度（像素），推荐 10-30
+BLUR_INTENSITY = 15
 
 # 文字颜色 (R, G, B)
 BLUR_TEXT_COLOR = (255, 255, 255)    # 白色文字
