@@ -1134,10 +1134,12 @@ def process_single_image(
 
         # 按顺序应用每个样式
         result = image
+        # 从kwargs中移除logo_path，避免重复传递
+        kwargs_clean = {k: v for k, v in kwargs.items() if k != 'logo_path'}
         for i, single_style in enumerate(styles):
             if len(styles) > 1:
                 print(f"  应用样式 [{i+1}/{len(styles)}]: {single_style}")
-            result = apply_single_style(result, single_style, exif_data, custom_text, logo_path, **kwargs)
+            result = apply_single_style(result, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
 
         # 保存图片
         output_dir = Path(output_path).parent
