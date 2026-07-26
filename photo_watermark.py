@@ -15,10 +15,21 @@
 
 import argparse
 import sys
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 import exifread
+
+
+def get_base_dir() -> Path:
+    """获取程序所在目录（兼容exe和源码运行）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包的 exe
+        return Path(sys.executable).parent
+    else:
+        # 源码运行
+        return Path(__file__).parent
 
 # 导入配置
 try:
@@ -249,7 +260,7 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
     brand_upper = brand.upper().strip()
 
     # Logo所在目录（默认为 logos/ 子目录）
-    logo_base = Path(logo_dir) if logo_dir else Path(__file__).parent / 'logos'
+    logo_base = Path(logo_dir) if logo_dir else get_base_dir() / 'logos'
 
     # 查找匹配的Logo
     for key, logo_file in brand_logo_map.items():
@@ -257,10 +268,16 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
             logo_path = logo_base / logo_file
             if logo_path.exists():
                 return str(logo_path)
+            else:
+                print(f"  Logo文件不存在: {logo_path}")
 
     # 默认返回Nikon Logo
     default_logo = logo_base / 'nikon_logo.png'
-    return str(default_logo) if default_logo.exists() else ''
+    if default_logo.exists():
+        return str(default_logo)
+    else:
+        print(f"  默认Logo不存在: {default_logo}")
+        return ''
 
 
 def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
@@ -908,7 +925,7 @@ def main():
     )
     parser.add_argument(
         '--logo',
-        default=str(Path(__file__).parent / 'logos' / 'nikon_logo.png'),
+        default=str(get_base_dir() / 'logos' / 'nikon_logo.png'),
         help='Logo图片路径（默认: nikon_logo.png）',
     )
 
