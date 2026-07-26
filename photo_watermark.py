@@ -117,6 +117,32 @@ DEFAULT_OUTPUT = get_config_value('基础设置', '默认输出路径', DEFAULT_
 JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY if 'JPEG_QUALITY' in dir() else 98, 'int')
 AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT if 'AUTO_OPEN_OUTPUT' in dir() else True, 'bool')
 
+# 文字模板
+TEMPLATE_LINE1 = get_config_value('文字模板', '第一行格式', '{相机}')
+TEMPLATE_LINE2 = get_config_value('文字模板', '第二行格式', '{镜头}')
+TEMPLATE_PARAMS = get_config_value('文字模板', '右侧参数格式', '{焦距} {光圈} {快门} {ISO}')
+TEMPLATE_DATE = get_config_value('文字模板', '右侧日期格式', '{日期}')
+TEMPLATE_TRANSPARENT = get_config_value('文字模板', '半透明格式', '{相机} | {焦距} {光圈} {快门} {ISO}')
+TEMPLATE_BORDER = get_config_value('文字模板', '边框格式', '{焦距} {光圈} {快门} {ISO} | {日期}')
+TEMPLATE_BLUR = get_config_value('文字模板', '模糊格式', '{焦距} {光圈} {快门} {ISO}')
+TEMPLATE_BLUR_LINE2 = get_config_value('文字模板', '模糊第二行格式', '{日期}')
+
+# 字体设置
+FONT_PATH = get_config_value('字体设置', '字体路径', '')
+
+# 颜色设置
+COLOR_BORDER_BG = parse_color(get_config_value('颜色设置', '白条背景', '白色'))
+COLOR_CAMERA = parse_color(get_config_value('颜色设置', '白条相机颜色', '30,30,30'))
+COLOR_LENS = parse_color(get_config_value('颜色设置', '白条镜头颜色', '120,120,120'))
+COLOR_PARAMS = parse_color(get_config_value('颜色设置', '白条参数颜色', '30,30,30'))
+COLOR_DATE = parse_color(get_config_value('颜色设置', '白条日期颜色', '100,100,100'))
+BLUR_TEXT_COLOR = parse_color(get_config_value('颜色设置', '模糊文字颜色', '白色'))
+BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
+BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
+
+# 白条边框垂直对齐
+STRIP_VALIGN = get_config_value('白条边框', '垂直对齐', '中')
+
 # 白条边框样式
 BORDER_HEIGHT_RATIO = get_config_value('白条边框', '边框高度', BORDER_HEIGHT_RATIO if 'BORDER_HEIGHT_RATIO' in dir() else 0.08, 'float')
 FONT_SIZE_RATIO = get_config_value('白条边框', '字体大小', FONT_SIZE_RATIO if 'FONT_SIZE_RATIO' in dir() else 3, 'int')
@@ -360,6 +386,43 @@ def read_exif(image_path: str) -> Dict[str, str]:
     return exif_data
 
 
+def format_template(template: str, exif_data: Dict[str, str]) -> str:
+    """
+    根据模板格式化EXIF数据
+
+    Args:
+        template: 模板字符串，如 "{相机} | {焦距} {光圈}"
+        exif_data: EXIF数据字典
+
+    Returns:
+        格式化后的字符串
+    """
+    # 日期格式化：2026:07:26 -> 2026-07-26
+    date_str = exif_data.get('datetime', '')
+    if date_str:
+        date_str = date_str.replace(':', '-', 2)[:10]
+
+    replacements = {
+        '{相机}': exif_data.get('camera', ''),
+        '{镜头}': exif_data.get('lens', ''),
+        '{焦距}': exif_data.get('focal_length', ''),
+        '{光圈}': exif_data.get('aperture', ''),
+        '{快门}': exif_data.get('shutter', ''),
+        '{ISO}': exif_data.get('iso', ''),
+        '{日期}': date_str,
+        '{品牌}': exif_data.get('brand', ''),
+    }
+
+    result = template
+    for key, value in replacements.items():
+        result = result.replace(key, value)
+
+    # 清理多余空格
+    result = ' '.join(result.split())
+
+    return result
+
+
 # 字体缓存
 _font_cache = {}
 
@@ -379,13 +442,20 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     if cache_key in _font_cache:
         return _font_cache[cache_key]
 
+    # 字体路径列表
+    font_paths = []
+
+    # 如果配置了字体路径，优先使用
+    if FONT_PATH and Path(FONT_PATH).exists():
+        font_paths.append(FONT_PATH)
+
     # Windows系统字体路径（粗体用 msyhbd.ttc）
-    font_paths = [
+    font_paths.extend([
         'C:/Windows/Fonts/msyhbd.ttc' if bold else 'C:/Windows/Fonts/msyh.ttc',  # 微软雅黑
         'C:/Windows/Fonts/simhei.ttf',     # 黑体
         'C:/Windows/Fonts/simsun.ttc',     # 宋体
         'C:/Windows/Fonts/arial.ttf',      # Arial
-    ]
+    ])
 
     for font_path in font_paths:
         try:
@@ -574,34 +644,39 @@ def apply_white_border(
     # 绘制文字
     draw = ImageDraw.Draw(new_image)
 
-    # ========== 左侧：镜头和相机信息 ==========
-    lens_text = exif_data.get('lens', '')
-    camera_text = exif_data.get('camera', '')
+    # ========== 左侧：使用模板格式化 ==========
+    line1_text = format_template(TEMPLATE_LINE1, exif_data)
+    line2_text = format_template(TEMPLATE_LINE2, exif_data)
 
-    # 相机型号（第一行，深色）
-    if camera_text:
+    # 垂直对齐计算
+    if STRIP_VALIGN == '上':
+        text_y = height + 4
+    elif STRIP_VALIGN == '下':
+        text_y = height + border_height - font_size * 2 - LINE_SPACING - 4
+    else:  # 中
+        text_y = margin_top
+
+    # 第一行（深色）
+    if line1_text:
         draw.text(
-            (left_margin, margin_top),
-            camera_text,
+            (left_margin, text_y),
+            line1_text,
             fill=COLOR_CAMERA,
             font=font_bold,
         )
 
-    # 镜头型号（第二行，灰色）
-    if lens_text:
+    # 第二行（灰色）
+    if line2_text:
         draw.text(
-            (left_margin, margin_top + font_size + LINE_SPACING),
-            lens_text,
+            (left_margin, text_y + font_size + LINE_SPACING),
+            line2_text,
             fill=COLOR_LENS,
             font=font,
         )
 
-    # ========== 右侧：参数 + Logo + 日期 ==========
-    # 拍摄参数（焦距 光圈 快门 ISO）
-    params_text = get_params_text(exif_data)
-
-    # 日期时间
-    datetime_text = exif_data.get('datetime', '')
+    # ========== 右侧：使用模板格式化 ==========
+    params_text = format_template(TEMPLATE_PARAMS, exif_data)
+    datetime_text = format_template(TEMPLATE_DATE, exif_data)
 
     # 绘制参数（第一行右侧，最前面）
     params_x = right_x  # 默认右对齐
