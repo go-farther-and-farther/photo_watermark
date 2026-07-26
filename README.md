@@ -11,7 +11,7 @@
 
 - **自动匹配品牌Logo**
   - 根据相机品牌自动选择对应Logo
-  - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、Pentax、Panasonic
+  - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
 - **四种水印样式**
@@ -132,7 +132,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 | Sony | `sony_logo.png` |
 | Fujifilm | `fuji_logo.png` |
 | Hasselblad | `hasselblad_logo.jpeg` |
-| Olympus | `olympus_logo.jpeg` |
+| Olympus / OM System | `olympus_logo.jpeg` |
 | Pentax | `pentax_logo.jpeg` |
 | Panasonic | `panasonic_logo.jpeg` |
 

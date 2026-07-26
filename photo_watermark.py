@@ -40,7 +40,7 @@ except ImportError:
     DEFAULT_LOGO = ''
     DEFAULT_INPUT = ''
     DEFAULT_OUTPUT = ''
-    JPEG_QUALITY = 95
+    JPEG_QUALITY = 98
     FONT_SIZE_RATIO = 3
     # white 样式
     BORDER_HEIGHT_RATIO = 0.08
@@ -124,12 +124,16 @@ def read_exif(image_path: str) -> Dict[str, str]:
                 exif_data['orientation'] = orientation_map.get(orientation_str, 1)
                 print(f"  EXIF方向: {orientation_str} -> {exif_data['orientation']}")
 
+        # 品牌信息（优先从 Image Make 读取）
+        if 'Image Make' in tags:
+            make = str(tags['Image Make']).strip()
+            exif_data['brand'] = make.upper()
+            print(f"  EXIF品牌: {make} -> {exif_data['brand']}")
+
         # 相机型号
         if 'Image Model' in tags:
             make = str(tags.get('Image Make', '')).strip()
             model = str(tags['Image Model']).strip()
-            # 保存品牌信息用于Logo选择
-            exif_data['brand'] = make.upper()
             # 精简显示：只保留品牌核心词+型号
             if make and model:
                 # 去掉冗余词（大小写不敏感）
@@ -203,6 +207,11 @@ def read_exif(image_path: str) -> Dict[str, str]:
         ctime = os.path.getctime(image_path)
         exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%S')
 
+        # 输出识别结果
+        print(f"  相机: {exif_data.get('camera', '未识别')}")
+        print(f"  镜头: {exif_data.get('lens', '未识别')}")
+        print(f"  参数: {exif_data.get('aperture', '-')} {exif_data.get('shutter', '-')} {exif_data.get('iso', '-')} {exif_data.get('focal_length', '-')}")
+
     except Exception as e:
         print(f"警告: 读取EXIF信息失败 - {e}")
 
@@ -249,16 +258,18 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
     Returns:
         Logo文件路径
     """
-    # 品牌到Logo文件的映射
+    # 品牌到Logo文件的映射（短关键字放前面，避免先匹配长的失败）
     brand_logo_map = {
         'NIKON': 'nikon_logo.png',
         'CANON': 'canon_logo.png',
         'SONY': 'sony_logo.png',
-        'FUJIFILM': 'fuji_logo.png',
         'FUJI': 'fuji_logo.png',
         'HASSELBLAD': 'hasselblad_logo.jpeg',
         'OLYMPUS': 'olympus_logo.jpeg',
+        'OM DIGITAL': 'olympus_logo.jpeg',  # OM System（前身奥林巴斯）
+        'OM SYSTEM': 'olympus_logo.jpeg',   # OM System
         'PENTAX': 'pentax_logo.jpeg',
+        'RICOH': 'pentax_logo.jpeg',        # 宾得已被理光收购
         'PANASONIC': 'panasonic_logo.jpeg',
     }
 
@@ -269,9 +280,11 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
     logo_base = Path(logo_dir) if logo_dir else get_base_dir() / 'logos'
 
     # 查找匹配的Logo
+    print(f"  品牌匹配: brand_upper=[{brand_upper}], logo_base=[{logo_base}]")
     for key, logo_file in brand_logo_map.items():
         if key in brand_upper:
             logo_path = logo_base / logo_file
+            print(f"  匹配到: key=[{key}], logo_file=[{logo_file}], exists={logo_path.exists()}")
             if logo_path.exists():
                 return str(logo_path)
             else:
@@ -460,6 +473,8 @@ def apply_white_border(
     if logo_path and Path(logo_path).exists():
         try:
             logo = Image.open(logo_path)
+            print(f"  Logo文件: {Path(logo_path).name} (原始尺寸: {logo.width}x{logo.height})")
+
             # 调整logo大小
             logo_height = int(border_height * LOGO_HEIGHT_RATIO)
             logo_ratio = logo_height / logo.height
@@ -470,10 +485,7 @@ def apply_white_border(
             logo_x = params_x - logo_width - logo_params_spacing
             logo_y = height + (border_height - logo_height) // 2
 
-            # 调试输出
-            print(f"  Logo尺寸: {logo_width}x{logo_height}")
-            print(f"  Logo位置: ({logo_x}, {logo_y})")
-            print(f"  参数位置: params_x={params_x}, spacing={logo_params_spacing}")
+            print(f"  Logo缩放后: {logo_width}x{logo_height}, 位置: ({logo_x}, {logo_y})")
 
             # 确保logo不会超出左边界
             if logo_x < left_margin:
@@ -830,7 +842,12 @@ def process_single_image(
 
         # 自动选择Logo（根据相机品牌）
         logo_path = kwargs.get('logo_path', '')
-        if not logo_path or not Path(logo_path).exists():
+        if logo_path and not Path(logo_path).exists():
+            # logo_path 不是有效路径，尝试当作品牌名匹配
+            logo_path = get_logo_by_brand(logo_path)
+            print(f"  指定Logo: {Path(logo_path).name}")
+        elif not logo_path:
+            # logo_path 为空，根据品牌自动匹配
             brand = exif_data.get('brand', '')
             if brand:
                 logo_path = get_logo_by_brand(brand)
@@ -1081,8 +1098,8 @@ def main():
     )
     parser.add_argument(
         '--logo',
-        default=str(get_base_dir() / 'logos' / 'nikon_logo.png'),
-        help='Logo图片路径（默认: nikon_logo.png）',
+        default=DEFAULT_LOGO,
+        help='Logo图片路径（留空则根据品牌自动匹配）',
     )
 
     args = parser.parse_args()

@@ -19,8 +19,8 @@ DEFAULT_INPUT = './input'
 # 默认输出路径（留空则在输入路径同级创建 output 文件夹）
 DEFAULT_OUTPUT = './output'
 
-# JPEG输出质量 (1-100)
-JPEG_QUALITY = 95
+# JPEG输出质量 (1-100)，98 接近原图质量，文件大小合理
+JPEG_QUALITY = 100
 
 # 字体设置
 FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
