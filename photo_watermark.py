@@ -97,6 +97,7 @@ def read_exif(image_path: str) -> Dict[str, str]:
         'focal_length': '',
         'datetime': '',
         'orientation': 1,  # 默认方向
+        'brand': '',  # 品牌
     }
 
     try:
@@ -200,12 +201,16 @@ def read_exif(image_path: str) -> Dict[str, str]:
             else:
                 exif_data['focal_length'] = f"{focal}mm"
 
-        # 拍摄时间 - 使用文件创建日期
+        # 拍摄时间 - 优先从EXIF读取，fallback到文件创建时间
         import os
         from datetime import datetime
-        # 获取文件创建时间
-        ctime = os.path.getctime(image_path)
-        exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%S')
+        for tag in ['EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime']:
+            if tag in tags:
+                exif_data['datetime'] = str(tags[tag]).strip()
+                break
+        if not exif_data['datetime']:
+            ctime = os.path.getctime(image_path)
+            exif_data['datetime'] = datetime.fromtimestamp(ctime).strftime('%Y:%m:%d %H:%M:%S')
 
         # 输出识别结果
         print(f"  相机: {exif_data.get('camera', '未识别')}")
@@ -290,13 +295,9 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
             else:
                 print(f"  Logo文件不存在: {logo_path}")
 
-    # 默认返回Nikon Logo
-    default_logo = logo_base / 'nikon_logo.png'
-    if default_logo.exists():
-        return str(default_logo)
-    else:
-        print(f"  默认Logo不存在: {default_logo}")
-        return ''
+    # 未匹配到品牌，返回空（不使用Logo）
+    print(f"  未匹配到品牌Logo: {brand_upper}")
+    return ''
 
 
 def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
@@ -895,7 +896,7 @@ def process_single_image(
         # 根据输出格式选择保存参数
         output_ext = Path(output_path).suffix.lower()
         if output_ext in ('.jpg', '.jpeg'):
-            result.save(output_path, 'JPEG', quality=kwargs.get('quality', 95))
+            result.save(output_path, 'JPEG', quality=kwargs.get('quality', JPEG_QUALITY))
         elif output_ext == '.png':
             result.save(output_path, 'PNG')
         else:
@@ -1232,17 +1233,13 @@ def main():
         print(f"错误: 无效的输入路径 - {args.input}")
         sys.exit(1)
 
-    # 等待30秒后关闭（exe模式下使用）
-    import time
-    print()
-    print("=" * 50)
-    print("处理完成！程序将在30秒后自动关闭...")
-    print("按 Ctrl+C 可立即关闭")
-    print("=" * 50)
-    try:
-        time.sleep(30)
-    except KeyboardInterrupt:
-        print("\n用户中断，程序关闭")
+    # exe模式下等待用户确认，源码运行时直接退出
+    if getattr(sys, 'frozen', False):
+        print()
+        print("=" * 50)
+        print("处理完成！")
+        print("=" * 50)
+        input("按回车键关闭...")
 
 
 if __name__ == '__main__':
