@@ -16,6 +16,7 @@
 import argparse
 import sys
 import os
+import configparser
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,25 +38,117 @@ def get_base_dir() -> Path:
         # 源码运行
         return Path(__file__).parent
 
-# 导入配置
+
+def load_ini_config() -> configparser.ConfigParser:
+    """加载 .ini 配置文件"""
+    config = configparser.ConfigParser()
+    ini_path = get_base_dir() / '水印设置.ini'
+
+    if ini_path.exists():
+        try:
+            config.read(ini_path, encoding='utf-8')
+            print(f"✅ 已加载配置: {ini_path.name}")
+        except Exception as e:
+            print(f"⚠️ 配置文件读取失败: {e}")
+    return config
+
+
+# 加载 .ini 配置
+_ini_config = load_ini_config()
+
+
+def get_config_value(section: str, key: str, fallback, value_type: str = 'str'):
+    """从 .ini 配置获取值，支持类型转换"""
+    if _ini_config.has_option(section, key):
+        if value_type == 'int':
+            return _ini_config.getint(section, key)
+        elif value_type == 'float':
+            return _ini_config.getfloat(section, key)
+        elif value_type == 'bool':
+            return _ini_config.get(section, key).lower() in ('是', 'yes', 'true', '1')
+        else:
+            return _ini_config.get(section, key)
+    return fallback
+
+
+# 导入配置（优先 .ini，其次 config.py，最后默认值）
 try:
     from config import *
 except ImportError:
-    # 默认配置（如果config.py不存在）
-    DEFAULT_STYLE = 'strip'
+    pass
+
+# 用 .ini 配置覆盖（如果存在）
+DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE if 'DEFAULT_STYLE' in dir() else 'strip')
+DEFAULT_INPUT = get_config_value('基础设置', '默认输入路径', DEFAULT_INPUT if 'DEFAULT_INPUT' in dir() else '')
+DEFAULT_OUTPUT = get_config_value('基础设置', '默认输出路径', DEFAULT_OUTPUT if 'DEFAULT_OUTPUT' in dir() else '')
+JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY if 'JPEG_QUALITY' in dir() else 98, 'int')
+AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT if 'AUTO_OPEN_OUTPUT' in dir() else True, 'bool')
+
+# 白条边框样式
+BORDER_HEIGHT_RATIO = get_config_value('白条边框', '边框高度', BORDER_HEIGHT_RATIO if 'BORDER_HEIGHT_RATIO' in dir() else 0.08, 'float')
+FONT_SIZE_RATIO = get_config_value('白条边框', '字体大小', FONT_SIZE_RATIO if 'FONT_SIZE_RATIO' in dir() else 3, 'int')
+LEFT_MARGIN_RATIO = get_config_value('白条边框', '左侧边距', LEFT_MARGIN_RATIO if 'LEFT_MARGIN_RATIO' in dir() else 0.025, 'float')
+RIGHT_MARGIN_RATIO = get_config_value('白条边框', '右侧边距', RIGHT_MARGIN_RATIO if 'RIGHT_MARGIN_RATIO' in dir() else 0.025, 'float')
+LINE_SPACING = get_config_value('白条边框', '文字间距', LINE_SPACING if 'LINE_SPACING' in dir() else 6, 'int')
+
+# 半透明水印样式
+TRANSPARENT_POSITION = parse_position(get_config_value('半透明水印', '位置', TRANSPARENT_POSITION if 'TRANSPARENT_POSITION' in dir() else 'bottom-right'))
+TRANSPARENT_OPACITY = get_config_value('半透明水印', '透明度', TRANSPARENT_OPACITY if 'TRANSPARENT_OPACITY' in dir() else 128, 'int')
+TRANSPARENT_FONT_RATIO = get_config_value('半透明水印', '字体大小', TRANSPARENT_FONT_RATIO if 'TRANSPARENT_FONT_RATIO' in dir() else 0.03, 'float')
+
+# 纯色边框样式
+BORDER_FRAME_COLOR = parse_color(get_config_value('纯色边框', '边框颜色', '黑色'))
+BORDER_TEXT_COLOR = parse_color(get_config_value('纯色边框', '文字颜色', '白色'))
+BORDER_SIDE_RATIO = get_config_value('纯色边框', '边框宽度', BORDER_SIDE_RATIO if 'BORDER_SIDE_RATIO' in dir() else 0.04, 'float')
+BORDER_BOTTOM_RATIO = get_config_value('纯色边框', '底部宽度', BORDER_BOTTOM_RATIO if 'BORDER_BOTTOM_RATIO' in dir() else 0.08, 'float')
+
+# 模糊边框样式
+BLUR_BORDER_RATIO = get_config_value('模糊边框', '边框宽度', BLUR_BORDER_RATIO if 'BLUR_BORDER_RATIO' in dir() else 0.06, 'float')
+BLUR_INTENSITY = get_config_value('模糊边框', '模糊强度', BLUR_INTENSITY if 'BLUR_INTENSITY' in dir() else 15, 'int')
+BLUR_CORNER_RADIUS = get_config_value('模糊边框', '圆角大小', BLUR_CORNER_RADIUS if 'BLUR_CORNER_RADIUS' in dir() else 0.03, 'float')
+BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SHADOW if 'BLUR_TEXT_SHADOW' in dir() else True, 'bool')
+
+# 智能样式
+SMART_STYLE = get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool')
+LANDSCAPE_STYLE = get_config_value('智能样式', '横版样式', LANDSCAPE_STYLE if 'LANDSCAPE_STYLE' in dir() else 'strip')
+PORTRAIT_STYLE = get_config_value('智能样式', '竖版样式', PORTRAIT_STYLE if 'PORTRAIT_STYLE' in dir() else 'blur')
+SQUARE_STYLE = get_config_value('智能样式', '方形样式', SQUARE_STYLE if 'SQUARE_STYLE' in dir() else 'transparent')
+
+# 确保必要变量存在
+if 'DEFAULT_LOGO' not in dir():
     DEFAULT_LOGO = ''
-    DEFAULT_INPUT = ''
-    DEFAULT_OUTPUT = ''
-    JPEG_QUALITY = 98
-    FONT_SIZE_RATIO = 3
-    # white 样式
-    BORDER_HEIGHT_RATIO = 0.08
-    LEFT_MARGIN_RATIO = 0.025
-    LINE_SPACING = 6
-    RIGHT_MARGIN_RATIO = 0.025
+if 'LOGO_PARAMS_SPACING_RATIO' not in dir():
     LOGO_PARAMS_SPACING_RATIO = 0.03
+if 'LOGO_HEIGHT_RATIO' not in dir():
     LOGO_HEIGHT_RATIO = 0.7
+if 'VERTICAL_OFFSET_RATIO' not in dir():
     VERTICAL_OFFSET_RATIO = 0.15
+if 'COLOR_CAMERA' not in dir():
+    COLOR_CAMERA = (30, 30, 30)
+if 'COLOR_LENS' not in dir():
+    COLOR_LENS = (120, 120, 120)
+if 'COLOR_PARAMS' not in dir():
+    COLOR_PARAMS = (30, 30, 30)
+if 'COLOR_DATE' not in dir():
+    COLOR_DATE = (100, 100, 100)
+if 'COLOR_BORDER' not in dir():
+    COLOR_BORDER = (255, 255, 255)
+if 'TRANSPARENT_TEXT_COLOR' not in dir():
+    TRANSPARENT_TEXT_COLOR = (255, 255, 255)
+if 'TRANSPARENT_MARGIN_RATIO' not in dir():
+    TRANSPARENT_MARGIN_RATIO = 0.02
+if 'BLUR_TEXT_COLOR' not in dir():
+    BLUR_TEXT_COLOR = (255, 255, 255)
+if 'BLUR_BOTTOM_RATIO_MULTIPLIER' not in dir():
+    BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8
+if 'BLUR_BRIGHTNESS_FACTOR' not in dir():
+    BLUR_BRIGHTNESS_FACTOR = 0.85
+if 'BLUR_DOWNSAMPLE_FACTOR' not in dir():
+    BLUR_DOWNSAMPLE_FACTOR = 4
+if 'OUTPUT_FILENAME_FORMAT' not in dir():
+    OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
+if 'OVERWRITE_EXISTING' not in dir():
+    OVERWRITE_EXISTING = False
     COLOR_CAMERA = (30, 30, 30)
     COLOR_LENS = (120, 120, 120)
     COLOR_PARAMS = (30, 30, 30)
@@ -1026,7 +1119,7 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
     解析颜色字符串
 
     Args:
-        color_str: 颜色字符串（如 'black', 'white', '255,255,255'）
+        color_str: 颜色字符串（如 'black', '黑色', '255,255,255'）
 
     Returns:
         RGB颜色元组
@@ -1039,6 +1132,12 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
         'blue': (0, 0, 255),
         'gray': (128, 128, 128),
         'grey': (128, 128, 128),
+        '黑色': (0, 0, 0),
+        '白色': (255, 255, 255),
+        '红色': (255, 0, 0),
+        '绿色': (0, 128, 0),
+        '蓝色': (0, 0, 255),
+        '灰色': (128, 128, 128),
     }
 
     color_str = color_str.lower().strip()
@@ -1055,6 +1154,30 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
 
     print(f"警告: 无法解析颜色 '{color_str}'，使用默认黑色")
     return (0, 0, 0)
+
+
+def parse_position(position_str: str) -> str:
+    """
+    解析位置字符串（支持中文）
+
+    Args:
+        position_str: 位置字符串（如 '右下', 'bottom-right'）
+
+    Returns:
+        标准位置字符串
+    """
+    positions = {
+        '左上': 'top-left',
+        '右上': 'top-right',
+        '左下': 'bottom-left',
+        '右下': 'bottom-right',
+        'top-left': 'top-left',
+        'top-right': 'top-right',
+        'bottom-left': 'bottom-left',
+        'bottom-right': 'bottom-right',
+    }
+
+    return positions.get(position_str.strip(), 'bottom-right')
 
 
 def get_smart_style(image_path: str) -> str:
