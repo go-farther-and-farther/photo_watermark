@@ -1018,6 +1018,56 @@ def apply_blur_border(
     return new_image
 
 
+def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs):
+    """
+    应用单个水印样式
+
+    Args:
+        image: PIL Image对象
+        style: 样式名称
+        exif_data: EXIF数据
+        custom_text: 自定义文字
+        logo_path: Logo路径
+        **kwargs: 其他参数
+
+    Returns:
+        处理后的Image对象
+    """
+    if style == 'strip':
+        return apply_white_border(
+            image, exif_data, custom_text,
+            logo_path=logo_path,
+        )
+    elif style == 'transparent':
+        return apply_transparent_watermark(
+            image, custom_text or format_exif_text(exif_data),
+            position=kwargs.get('position', ''),
+            opacity=kwargs.get('opacity', 0),
+            font_ratio=kwargs.get('font_ratio', 0.0),
+            text_color=kwargs.get('text_color', None),
+            margin_ratio=kwargs.get('margin_ratio', 0.0),
+        )
+    elif style == 'border':
+        return apply_color_border(
+            image, exif_data, custom_text,
+            border_color=kwargs.get('border_color', None),
+            text_color=kwargs.get('text_color', None),
+            border_side_ratio=kwargs.get('border_side_ratio', 0.0),
+            border_bottom_ratio=kwargs.get('border_bottom_ratio', 0.0),
+        )
+    elif style == 'blur':
+        return apply_blur_border(
+            image, exif_data, custom_text,
+            border_ratio=kwargs.get('border_ratio', 0.0),
+            blur_intensity=kwargs.get('blur_intensity', 0),
+            text_color=kwargs.get('text_color', None),
+            text_shadow=kwargs.get('text_shadow', True),
+        )
+    else:
+        print(f"  [警告] 未知样式: {style}")
+        return image
+
+
 def process_single_image(
     input_path: str,
     output_path: str,
@@ -1031,7 +1081,7 @@ def process_single_image(
     Args:
         input_path: 输入图片路径
         output_path: 输出图片路径
-        style: 边框样式（strip, transparent, border, blur）
+        style: 边框样式（strip, transparent, border, blur，可逗号分隔多选）
         custom_text: 自定义文字
         **kwargs: 其他参数
 
@@ -1079,40 +1129,15 @@ def process_single_image(
                 else:
                     print(f"  未找到品牌Logo: {brand}")
 
-        # 根据样式应用水印
-        if style == 'strip':
-            result = apply_white_border(
-                image, exif_data, custom_text,
-                logo_path=logo_path,
-            )
-        elif style == 'transparent':
-            result = apply_transparent_watermark(
-                image, custom_text or format_exif_text(exif_data),
-                position=kwargs.get('position', ''),
-                opacity=kwargs.get('opacity', 0),
-                font_ratio=kwargs.get('font_ratio', 0.0),
-                text_color=kwargs.get('text_color', None),
-                margin_ratio=kwargs.get('margin_ratio', 0.0),
-            )
-        elif style == 'border':
-            result = apply_color_border(
-                image, exif_data, custom_text,
-                border_color=kwargs.get('border_color', None),
-                text_color=kwargs.get('text_color', None),
-                border_side_ratio=kwargs.get('border_side_ratio', 0.0),
-                border_bottom_ratio=kwargs.get('border_bottom_ratio', 0.0),
-            )
-        elif style == 'blur':
-            result = apply_blur_border(
-                image, exif_data, custom_text,
-                border_ratio=kwargs.get('border_ratio', 0.0),
-                blur_intensity=kwargs.get('blur_intensity', 0),
-                text_color=kwargs.get('text_color', None),
-                text_shadow=kwargs.get('text_shadow', True),
-            )
-        else:
-            print(f"错误: 未知的样式 '{style}'")
-            return False
+        # 解析样式列表（支持逗号分隔多选）
+        styles = [s.strip() for s in style.split(',') if s.strip()]
+
+        # 按顺序应用每个样式
+        result = image
+        for i, single_style in enumerate(styles):
+            if len(styles) > 1:
+                print(f"  应用样式 [{i+1}/{len(styles)}]: {single_style}")
+            result = apply_single_style(result, single_style, exif_data, custom_text, logo_path, **kwargs)
 
         # 保存图片
         output_dir = Path(output_path).parent
