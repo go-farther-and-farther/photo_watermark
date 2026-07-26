@@ -10,6 +10,14 @@
 # blur        - 模糊边框，取图片边缘做高斯模糊作为边框，效果自然好看
 DEFAULT_STYLE = 'strip'
 
+# 智能样式选择（根据照片方向自动选择）
+# 'auto' - 根据照片方向自动选择样式
+# 其他值 - 固定使用指定样式
+SMART_STYLE = 'auto'
+LANDSCAPE_STYLE = 'strip'      # 横版照片默认样式
+PORTRAIT_STYLE = 'blur'        # 竖版照片默认样式
+SQUARE_STYLE = 'transparent'   # 方形照片默认样式
+
 # 默认Logo（留空则自动根据品牌选择）
 DEFAULT_LOGO = ''
 
@@ -110,3 +118,6 @@ OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
 
 # 是否覆盖已存在的文件
 OVERWRITE_EXISTING = False
+
+# 处理完成后自动打开输出目录
+AUTO_OPEN_OUTPUT = True

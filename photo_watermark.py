@@ -84,6 +84,7 @@ except ImportError:
     # 输出设置
     OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
     OVERWRITE_EXISTING = False
+    AUTO_OPEN_OUTPUT = True
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp'}
@@ -227,7 +228,8 @@ def read_exif(image_path: str) -> Dict[str, str]:
         print(f"  参数: {exif_data.get('aperture', '-')} {exif_data.get('shutter', '-')} {exif_data.get('iso', '-')} {exif_data.get('focal_length', '-')}")
 
     except Exception as e:
-        print(f"警告: 读取EXIF信息失败 - {e}")
+        print(f"⚠️ 未找到EXIF信息: {e}")
+        print(f"   提示：手机照片可能需要先关闭'优化存储'功能")
 
     return exif_data
 
@@ -514,7 +516,8 @@ def apply_white_border(
 
             new_image.paste(logo, (logo_x, logo_y), logo if logo.mode == 'RGBA' else None)
         except Exception as e:
-            print(f"  警告: 加载logo失败 - {e}")
+            print(f"  ⚠️ Logo加载失败: {e}")
+            print(f"     提示：将使用文字水印替代")
 
     # 绘制日期时间（第二行右侧，参数下方）
     if datetime_text:
@@ -969,13 +972,29 @@ def batch_process(
     image_files = sorted(set(image_files))
 
     if not image_files:
-        print(f"警告: 在 {input_dir} 中没有找到支持的图片文件")
-        return 0, 0
+        print(f"⚠️ 在 {input_dir} 中没有找到支持的图片文件")
+        print(f"   支持格式: {', '.join(SUPPORTED_FORMATS)}")
+        return 0, 0, 0
 
     print(f"找到 {len(image_files)} 张图片")
 
+    # 尝试导入进度条
+    try:
+        from tqdm import tqdm
+        use_progress_bar = True
+    except ImportError:
+        use_progress_bar = False
+
     success_count = 0
-    for i, img_file in enumerate(image_files, 1):
+    start_time = datetime.now()
+
+    # 使用进度条或普通循环
+    if use_progress_bar:
+        iterator = tqdm(image_files, desc="处理中", unit="张")
+    else:
+        iterator = image_files
+
+    for i, img_file in enumerate(iterator, 1):
         # 使用配置的命名格式
         output_name = OUTPUT_FILENAME_FORMAT.format(
             name=img_file.stem,
@@ -983,17 +1002,23 @@ def batch_process(
         )
         output_file = output_path / f"{output_name}{img_file.suffix}"
 
-        print(f"[{i}/{len(image_files)}] 处理: {img_file.name}")
+        if not use_progress_bar:
+            print(f"[{i}/{len(image_files)}] 处理: {img_file.name}")
 
         if process_single_image(
             str(img_file), str(output_file), style, custom_text, **kwargs
         ):
             success_count += 1
-            print(f"  -> 保存到: {output_file.name}")
+            if not use_progress_bar:
+                print(f"  -> 保存到: {output_file.name}")
         else:
-            print(f"  -> 处理失败")
+            if not use_progress_bar:
+                print(f"  -> 处理失败")
 
-    return success_count, len(image_files)
+    # 计算用时
+    elapsed_time = (datetime.now() - start_time).total_seconds()
+
+    return success_count, len(image_files), elapsed_time
 
 
 def parse_color(color_str: str) -> Tuple[int, int, int]:
@@ -1030,6 +1055,31 @@ def parse_color(color_str: str) -> Tuple[int, int, int]:
 
     print(f"警告: 无法解析颜色 '{color_str}'，使用默认黑色")
     return (0, 0, 0)
+
+
+def get_smart_style(image_path: str) -> str:
+    """
+    根据照片方向智能选择水印样式
+
+    Args:
+        image_path: 图片路径
+
+    Returns:
+        样式名称
+    """
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            ratio = width / height
+
+            if ratio > 1.2:
+                return LANDSCAPE_STYLE  # 横版
+            elif ratio < 0.8:
+                return PORTRAIT_STYLE   # 竖版
+            else:
+                return SQUARE_STYLE     # 方形
+    except Exception:
+        return DEFAULT_STYLE
 
 
 def main():
@@ -1228,6 +1278,13 @@ def main():
     # 预览模式：只处理第一张图片并显示
     if args.preview and input_path.is_file():
         print("预览模式：显示效果但不保存")
+
+        # 智能样式选择
+        style = args.style
+        if SMART_STYLE == 'auto':
+            style = get_smart_style(str(input_path))
+            print(f"  智能样式: {style}（根据照片方向）")
+
         # 读取图片
         image = Image.open(input_path)
         if image.mode in ('RGBA', 'P'):
@@ -1238,13 +1295,13 @@ def main():
             image = auto_rotate_image(image, orientation)
 
         # 应用水印
-        if args.style == 'strip':
+        if style == 'strip':
             result = apply_white_border(image, exif_data, args.text, logo_path=args.logo)
-        elif args.style == 'transparent':
+        elif style == 'transparent':
             result = apply_transparent_watermark(image, args.text or format_exif_text(exif_data), **kwargs)
-        elif args.style == 'border':
+        elif style == 'border':
             result = apply_color_border(image, exif_data, args.text, **kwargs)
-        elif args.style == 'blur':
+        elif style == 'blur':
             result = apply_blur_border(image, exif_data, args.text, **kwargs)
 
         # 显示预览
@@ -1285,7 +1342,7 @@ def main():
         print(f"输出目录: {output_dir}")
         print("-" * 50)
 
-        success, total = batch_process(
+        success, total, elapsed_time = batch_process(
             str(input_path), output_dir, args.style, args.text, **kwargs
         )
 
@@ -1294,7 +1351,12 @@ def main():
             print(f"✅ 全部完成: {success}/{total} 张图片处理成功")
         else:
             print(f"⚠️  部分完成: {success}/{total} 张图片处理成功")
+        print(f"⏱️  用时: {elapsed_time:.1f} 秒")
         print(f"📁 输出目录: {output_dir}")
+
+        # 自动打开输出目录（Windows）
+        if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
+            os.startfile(output_dir)
 
     else:
         print(f"错误: 无效的输入路径 - {args.input}")
