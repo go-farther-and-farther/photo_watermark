@@ -670,7 +670,7 @@ def apply_blur_border(
 ) -> Image.Image:
     """
     应用模糊边框样式
-    取图片边缘像素，做高斯模糊，作为边框背景
+    把原图放大做模糊背景，再把清晰原图叠上去
 
     Args:
         image: 原始图片
@@ -696,41 +696,24 @@ def apply_blur_border(
 
     width, height = image.size
     border_size = int(width * border_ratio)
-    bottom_border = int(width * border_ratio * 1.5)  # 底部稍宽
+    bottom_border = int(width * border_ratio * 1.8)  # 底部更宽，放文字
 
     # 计算新图片尺寸
     new_width = width + 2 * border_size
     new_height = height + border_size + bottom_border
 
-    # ========== 创建模糊边框 ==========
+    # ========== 创建模糊背景 ==========
 
-    # 1. 底部边框：取图片底部一条，拉伸+模糊
-    bottom_strip_height = max(bottom_border * 2, 50)  # 取足够的高度
-    bottom_strip = image.crop((0, height - bottom_strip_height, width, height))
-    bottom_strip = bottom_strip.resize((width, bottom_border), Image.Resampling.LANCZOS)
-    bottom_strip = bottom_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+    # 1. 把原图放大到新尺寸（覆盖边框区域）
+    bg_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-    # 2. 左侧边框：取图片左侧一条，拉伸+模糊
-    left_strip_width = max(border_size * 2, 50)
-    left_strip = image.crop((0, 0, left_strip_width, height))
-    left_strip = left_strip.resize((border_size, height), Image.Resampling.LANCZOS)
-    left_strip = left_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+    # 2. 对放大后的图片做高斯模糊
+    bg_image = bg_image.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
 
-    # 3. 右侧边框：取图片右侧一条，拉伸+模糊
-    right_strip = image.crop((width - left_strip_width, 0, width, height))
-    right_strip = right_strip.resize((border_size, height), Image.Resampling.LANCZOS)
-    right_strip = right_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+    # 3. 把清晰原图贴到中间
+    bg_image.paste(image, (border_size, border_size))
 
-    # 4. 创建新图片
-    new_image = Image.new('RGB', (new_width, new_height), (0, 0, 0))
-
-    # 粘贴模糊边框
-    new_image.paste(left_strip, (0, border_size))  # 左侧
-    new_image.paste(right_strip, (width + border_size, border_size))  # 右侧
-    new_image.paste(bottom_strip, (border_size, height + border_size))  # 底部
-
-    # 粘贴原图
-    new_image.paste(image, (border_size, border_size))
+    new_image = bg_image
 
     # ========== 绘制文字 ==========
     draw = ImageDraw.Draw(new_image)
