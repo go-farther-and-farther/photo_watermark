@@ -21,6 +21,10 @@ SQUARE_STYLE = 'transparent'   # 方形照片默认样式
 # 默认Logo（留空则自动根据品牌选择）
 DEFAULT_LOGO = ''
 
+# 默认自定义文字/签名（留空则不显示，命令行 --text 可覆盖）
+# 示例：'©我的签名'  'Photographer Name'
+DEFAULT_TEXT = ''
+
 # 默认输入路径（留空则每次弹出选择对话框）
 DEFAULT_INPUT = './input'
 

@@ -116,6 +116,7 @@ DEFAULT_INPUT = get_config_value('基础设置', '默认输入路径', DEFAULT_I
 DEFAULT_OUTPUT = get_config_value('基础设置', '默认输出路径', DEFAULT_OUTPUT if 'DEFAULT_OUTPUT' in dir() else '')
 JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY if 'JPEG_QUALITY' in dir() else 98, 'int')
 AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT if 'AUTO_OPEN_OUTPUT' in dir() else True, 'bool')
+DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT if 'DEFAULT_TEXT' in dir() else '')
 
 # 文字模板
 TEMPLATE_LINE1 = get_config_value('文字模板', '第一行格式', '{相机}')
@@ -174,6 +175,8 @@ SQUARE_STYLE = get_config_value('智能样式', '方形样式', SQUARE_STYLE if 
 # 确保必要变量存在
 if 'DEFAULT_LOGO' not in dir():
     DEFAULT_LOGO = ''
+if 'DEFAULT_TEXT' not in dir():
+    DEFAULT_TEXT = ''
 if 'LOGO_PARAMS_SPACING_RATIO' not in dir():
     LOGO_PARAMS_SPACING_RATIO = 0.03
 if 'LOGO_HEIGHT_RATIO' not in dir():
@@ -1308,6 +1311,8 @@ def main():
         tips.append("DEFAULT_OUTPUT 未设置，将自动命名输出文件")
     if not DEFAULT_LOGO:
         tips.append("DEFAULT_LOGO 未设置，将根据品牌自动匹配")
+    if DEFAULT_TEXT:
+        tips.append(f"自定义文字: {DEFAULT_TEXT}")
 
     if tips:
         print("[提示] 提示（可在 config.py 中修改）:")
@@ -1352,8 +1357,8 @@ def main():
     )
     parser.add_argument(
         '-t', '--text',
-        default='',
-        help='自定义水印文字（如摄影师名字）',
+        default=DEFAULT_TEXT,
+        help='自定义水印文字（如摄影师名字），默认读取config.py的DEFAULT_TEXT',
     )
     parser.add_argument(
         '-p', '--position',
