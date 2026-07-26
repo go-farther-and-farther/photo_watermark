@@ -722,8 +722,18 @@ def apply_blur_border(
     from PIL import ImageEnhance
     bg_image = ImageEnhance.Brightness(bg_image).enhance(0.85)
 
-    # 6. 把清晰原图贴到中间
-    bg_image.paste(image, (border_size, border_size))
+    # 6. 给原图加圆角
+    corner_radius = int(border_size * 1.5)  # 圆角半径
+    corner_mask = Image.new('L', (width, height), 0)
+    mask_draw = ImageDraw.Draw(corner_mask)
+    mask_draw.rounded_rectangle(
+        [(0, 0), (width - 1, height - 1)],
+        radius=corner_radius,
+        fill=255
+    )
+
+    # 7. 把清晰原图贴到中间（带圆角）
+    bg_image.paste(image, (border_size, border_size), corner_mask)
 
     new_image = bg_image
 
