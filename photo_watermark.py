@@ -817,10 +817,25 @@ def main():
     # 显示项目信息
     print("=" * 50)
     print("  Photo Watermark - 相机照片水印边框生成器")
-    print("  版本: v1.1.0")
+    print("  版本: v1.1.1")
     print("  项目: https://github.com/go-farther-and-farther/photo_watermark")
     print("=" * 50)
     print()
+
+    # 显示配置状态提示
+    tips = []
+    if not DEFAULT_INPUT:
+        tips.append("DEFAULT_INPUT 未设置，将弹出选择对话框")
+    if not DEFAULT_OUTPUT:
+        tips.append("DEFAULT_OUTPUT 未设置，将自动命名输出文件")
+    if not DEFAULT_LOGO:
+        tips.append("DEFAULT_LOGO 未设置，将根据品牌自动匹配")
+
+    if tips:
+        print("💡 提示（可在 config.py 中修改）:")
+        for tip in tips:
+            print(f"   • {tip}")
+        print()
 
     parser = argparse.ArgumentParser(
         description='相机照片水印边框生成器',
@@ -919,6 +934,11 @@ def main():
             if input_path and not input_path.exists():
                 print(f"路径不存在: {args.input}")
 
+            # 提示可以设置默认路径
+            if not DEFAULT_INPUT:
+                print("💡 提示: 在 config.py 中设置 DEFAULT_INPUT 可跳过此选择")
+                print()
+
             # 询问用户选择文件还是文件夹
             print("请选择要处理的内容：")
             print("1. 选择单张图片")
@@ -971,6 +991,14 @@ def main():
         'logo_path': args.logo,
     }
 
+    # 显示当前使用的配置
+    print(f"📌 当前配置:")
+    print(f"   样式: {args.style}")
+    print(f"   输入: {input_path}")
+    if args.text:
+        print(f"   自定义文字: {args.text}")
+    print()
+
     # 判断是单张图片还是文件夹
     if input_path.is_file():
         # 单张图片处理
@@ -983,9 +1011,9 @@ def main():
         if process_single_image(
             str(input_path), output_path, args.style, args.text, **kwargs
         ):
-            print(f"完成! 保存到: {output_path}")
+            print(f"✅ 完成! 保存到: {output_path}")
         else:
-            print("处理失败!")
+            print("❌ 处理失败!")
             sys.exit(1)
 
     elif input_path.is_dir():
@@ -997,7 +1025,6 @@ def main():
 
         print(f"批量处理文件夹: {input_path}")
         print(f"输出目录: {output_dir}")
-        print(f"样式: {args.style}")
         print("-" * 50)
 
         success, total = batch_process(
@@ -1005,8 +1032,11 @@ def main():
         )
 
         print("-" * 50)
-        print(f"处理完成: {success}/{total} 张图片成功")
-        print(f"输出目录: {output_dir}")
+        if success == total:
+            print(f"✅ 全部完成: {success}/{total} 张图片处理成功")
+        else:
+            print(f"⚠️  部分完成: {success}/{total} 张图片处理成功")
+        print(f"📁 输出目录: {output_dir}")
 
     else:
         print(f"错误: 无效的输入路径 - {args.input}")
