@@ -1446,7 +1446,7 @@ def main():
 
         # 自动打开输出目录（Windows）
         if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
-            os.startfile(output_dir)
+            os.startfile(os.path.abspath(output_dir))
 
     else:
         print(f"错误: 无效的输入路径 - {args.input}")
