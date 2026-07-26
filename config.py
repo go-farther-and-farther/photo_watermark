@@ -7,7 +7,8 @@
 # white       - 白底黑字边框，照片下方显示相机型号、镜头、拍摄参数、日期
 # transparent - 半透明文字水印，直接叠加在照片上，可选位置（左上/右上/左下/右下）
 # border      - 纯色边框包裹照片，底部显示拍摄参数，黑色边框经典，透明边框也不错
-DEFAULT_STYLE = 'transparent'
+# blur        - 模糊边框，取图片边缘做高斯模糊作为边框，效果自然好看
+DEFAULT_STYLE = 'blur'
 
 # 默认Logo（留空则自动根据品牌选择）
 DEFAULT_LOGO = ''
@@ -79,3 +80,17 @@ BORDER_SIDE_RATIO = 0.04
 
 # 底部边框宽度比例（相对于图片宽度，比两侧更宽）
 BORDER_BOTTOM_RATIO = 0.08
+
+# ==================== blur 样式（模糊边框） ====================
+
+# 边框宽度比例（相对于图片宽度）
+BLUR_BORDER_RATIO = 0.08
+
+# 模糊强度（像素），值越大越模糊，推荐 30-80
+BLUR_INTENSITY = 50
+
+# 文字颜色 (R, G, B)
+BLUR_TEXT_COLOR = (255, 255, 255)    # 白色文字
+
+# 是否添加文字阴影（在模糊背景上更清晰）
+BLUR_TEXT_SHADOW = True

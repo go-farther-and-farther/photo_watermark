@@ -66,6 +66,11 @@ except ImportError:
     BORDER_TEXT_COLOR = (255, 255, 255)
     BORDER_SIDE_RATIO = 0.04
     BORDER_BOTTOM_RATIO = 0.08
+    # blur 样式（模糊边框）
+    BLUR_BORDER_RATIO = 0.08
+    BLUR_INTENSITY = 50
+    BLUR_TEXT_COLOR = (255, 255, 255)
+    BLUR_TEXT_SHADOW = True
 
 
 # 支持的图片格式
@@ -654,6 +659,132 @@ def apply_color_border(
     return new_image
 
 
+def apply_blur_border(
+    image: Image.Image,
+    exif_data: Dict[str, str],
+    custom_text: str = '',
+    border_ratio: float = 0.0,
+    blur_intensity: int = 0,
+    text_color: Tuple[int, int, int] = None,
+    text_shadow: bool = True,
+) -> Image.Image:
+    """
+    应用模糊边框样式
+    取图片边缘像素，做高斯模糊，作为边框背景
+
+    Args:
+        image: 原始图片
+        exif_data: EXIF数据
+        custom_text: 自定义文字
+        border_ratio: 边框宽度比例（相对于图片宽度）
+        blur_intensity: 模糊强度（像素）
+        text_color: 文字颜色
+        text_shadow: 是否添加文字阴影
+
+    Returns:
+        添加边框后的图片
+    """
+    from PIL import ImageFilter
+
+    # 使用配置默认值
+    if border_ratio <= 0:
+        border_ratio = BLUR_BORDER_RATIO
+    if blur_intensity <= 0:
+        blur_intensity = BLUR_INTENSITY
+    if text_color is None:
+        text_color = BLUR_TEXT_COLOR
+
+    width, height = image.size
+    border_size = int(width * border_ratio)
+    bottom_border = int(width * border_ratio * 1.5)  # 底部稍宽
+
+    # 计算新图片尺寸
+    new_width = width + 2 * border_size
+    new_height = height + border_size + bottom_border
+
+    # ========== 创建模糊边框 ==========
+
+    # 1. 底部边框：取图片底部一条，拉伸+模糊
+    bottom_strip_height = max(bottom_border * 2, 50)  # 取足够的高度
+    bottom_strip = image.crop((0, height - bottom_strip_height, width, height))
+    bottom_strip = bottom_strip.resize((width, bottom_border), Image.Resampling.LANCZOS)
+    bottom_strip = bottom_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+
+    # 2. 左侧边框：取图片左侧一条，拉伸+模糊
+    left_strip_width = max(border_size * 2, 50)
+    left_strip = image.crop((0, 0, left_strip_width, height))
+    left_strip = left_strip.resize((border_size, height), Image.Resampling.LANCZOS)
+    left_strip = left_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+
+    # 3. 右侧边框：取图片右侧一条，拉伸+模糊
+    right_strip = image.crop((width - left_strip_width, 0, width, height))
+    right_strip = right_strip.resize((border_size, height), Image.Resampling.LANCZOS)
+    right_strip = right_strip.filter(ImageFilter.GaussianBlur(radius=blur_intensity))
+
+    # 4. 创建新图片
+    new_image = Image.new('RGB', (new_width, new_height), (0, 0, 0))
+
+    # 粘贴模糊边框
+    new_image.paste(left_strip, (0, border_size))  # 左侧
+    new_image.paste(right_strip, (width + border_size, border_size))  # 右侧
+    new_image.paste(bottom_strip, (border_size, height + border_size))  # 底部
+
+    # 粘贴原图
+    new_image.paste(image, (border_size, border_size))
+
+    # ========== 绘制文字 ==========
+    draw = ImageDraw.Draw(new_image)
+    font_size = max(14, bottom_border // 4)
+    font = get_font(font_size)
+
+    # 组合显示文本
+    params_parts = []
+    if exif_data.get('focal_length'):
+        params_parts.append(exif_data['focal_length'])
+    if exif_data.get('aperture'):
+        params_parts.append(exif_data['aperture'])
+    if exif_data.get('shutter'):
+        params_parts.append(exif_data['shutter'])
+    if exif_data.get('iso'):
+        params_parts.append(exif_data['iso'])
+    params_text = ' '.join(params_parts)
+
+    datetime_text = exif_data.get('datetime', '')
+    if datetime_text:
+        datetime_text = datetime_text.replace(':', '-', 2)[:10]
+
+    # 绘制拍摄参数（底部居中，第一行）
+    if params_text:
+        bbox = draw.textbbox((0, 0), params_text, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (new_width - text_width) // 2
+        y = height + border_size + (bottom_border - font_size * 2 - 8) // 2
+
+        # 文字阴影
+        if text_shadow:
+            shadow_offset = max(1, font_size // 15)
+            draw.text((x + shadow_offset, y + shadow_offset), params_text,
+                      fill=(0, 0, 0, 180), font=font)
+
+        draw.text((x, y), params_text, fill=text_color, font=font)
+
+    # 绘制日期（底部居中，第二行）
+    if datetime_text:
+        bbox = draw.textbbox((0, 0), datetime_text, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (new_width - text_width) // 2
+        y = height + border_size + (bottom_border - font_size * 2 - 8) // 2 + font_size + 6
+
+        if text_shadow:
+            shadow_offset = max(1, font_size // 15)
+            draw.text((x + shadow_offset, y + shadow_offset), datetime_text,
+                      fill=(0, 0, 0, 180), font=font)
+
+        draw.text((x, y), datetime_text, fill=text_color, font=font)
+
+    return new_image
+
+
 def process_single_image(
     input_path: str,
     output_path: str,
@@ -721,6 +852,14 @@ def process_single_image(
                 text_color=kwargs.get('text_color', None),
                 border_side_ratio=kwargs.get('border_side_ratio', 0.0),
                 border_bottom_ratio=kwargs.get('border_bottom_ratio', 0.0),
+            )
+        elif style == 'blur':
+            result = apply_blur_border(
+                image, exif_data, custom_text,
+                border_ratio=kwargs.get('border_ratio', 0.0),
+                blur_intensity=kwargs.get('blur_intensity', 0),
+                text_color=kwargs.get('text_color', None),
+                text_shadow=kwargs.get('text_shadow', True),
             )
         else:
             print(f"错误: 未知的样式 '{style}'")
@@ -897,7 +1036,7 @@ def main():
     )
     parser.add_argument(
         '-s', '--style',
-        choices=['white', 'transparent', 'border'],
+        choices=['white', 'transparent', 'border', 'blur'],
         default=DEFAULT_STYLE,
         help='边框样式: white(白底黑字), transparent(半透明), border(纯色边框)',
     )
