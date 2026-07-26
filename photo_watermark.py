@@ -697,38 +697,27 @@ def apply_white_border(
             print(f"  [警告] Logo加载失败: {e}")
             print(f"     提示：将使用文字水印替代")
 
-    # 绘制日期时间（第二行右侧，参数下方）
+    # 绘制日期时间 + 自定义文字（第二行右侧）
     if datetime_text:
-        # 格式化日期时间显示 - 只显示日期，不显示时间
-        # EXIF格式: "2026:04:08 12:23:00" -> "2026-04-08"
-        datetime_display = datetime_text.replace(':', '-', 2)  # 只替换前两个冒号为日期分隔
-        if len(datetime_display) > 10:
-            datetime_display = datetime_display[:10]  # 截取到日期部分
-
-        bbox = draw.textbbox((0, 0), datetime_display, font=font)
+        datetime_display = datetime_text.replace(':', '-', 2)[:10]
+        date_line = f"{datetime_display}  {custom_text}" if custom_text else datetime_display
+        bbox = draw.textbbox((0, 0), date_line, font=font)
         text_width = bbox[2] - bbox[0]
-        # 日期时间与参数对齐
         date_x = right_x - text_width
         draw.text(
             (date_x, margin_top + font_size + LINE_SPACING),
-            datetime_display,
+            date_line,
             fill=COLOR_DATE,
             font=font,
         )
-
-    # 绘制自定义文字/签名（右下角，日期下方）
-    if custom_text:
-        sign_font_size = max(10, font_size - 4)
-        sign_font = get_font(sign_font_size)
-        bbox = draw.textbbox((0, 0), custom_text, font=sign_font)
-        sign_w = bbox[2] - bbox[0]
-        sign_x = right_x - sign_w
-        sign_y = height + border_height - sign_font_size - int(border_height * 0.1)
+    elif custom_text:
+        bbox = draw.textbbox((0, 0), custom_text, font=font)
+        text_width = bbox[2] - bbox[0]
         draw.text(
-            (sign_x, sign_y),
+            (right_x - text_width, margin_top + font_size + LINE_SPACING),
             custom_text,
             fill=COLOR_DATE,
-            font=sign_font,
+            font=font,
         )
 
     return new_image
