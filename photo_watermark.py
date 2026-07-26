@@ -25,6 +25,13 @@ try:
     from config import *
 except ImportError:
     # 默认配置（如果config.py不存在）
+    DEFAULT_STYLE = 'white'
+    DEFAULT_LOGO = ''
+    DEFAULT_INPUT = ''
+    DEFAULT_OUTPUT = ''
+    JPEG_QUALITY = 95
+    FONT_SIZE_RATIO = 3
+    # white 样式
     BORDER_HEIGHT_RATIO = 0.08
     LEFT_MARGIN_RATIO = 0.025
     LINE_SPACING = 6
@@ -32,12 +39,22 @@ except ImportError:
     LOGO_PARAMS_SPACING_RATIO = 0.03
     LOGO_HEIGHT_RATIO = 0.7
     VERTICAL_OFFSET_RATIO = 0.15
-    FONT_SIZE_RATIO = 3
     COLOR_CAMERA = (30, 30, 30)
     COLOR_LENS = (120, 120, 120)
     COLOR_PARAMS = (30, 30, 30)
     COLOR_DATE = (100, 100, 100)
     COLOR_BORDER = (255, 255, 255)
+    # transparent 样式
+    TRANSPARENT_POSITION = 'bottom-right'
+    TRANSPARENT_OPACITY = 128
+    TRANSPARENT_FONT_RATIO = 0.03
+    TRANSPARENT_TEXT_COLOR = (255, 255, 255)
+    TRANSPARENT_MARGIN_RATIO = 0.02
+    # border 样式
+    BORDER_FRAME_COLOR = (0, 0, 0)
+    BORDER_TEXT_COLOR = (255, 255, 255)
+    BORDER_SIDE_RATIO = 0.04
+    BORDER_BOTTOM_RATIO = 0.08
 
 
 # 支持的图片格式
@@ -222,27 +239,27 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
         'SONY': 'sony_logo.png',
         'FUJIFILM': 'fuji_logo.png',
         'FUJI': 'fuji_logo.png',
+        'HASSELBLAD': 'hasselblad_logo.jpeg',
+        'OLYMPUS': 'olympus_logo.jpeg',
+        'PENTAX': 'pentax_logo.jpeg',
+        'PANASONIC': 'panasonic_logo.jpeg',
     }
 
     # 清理品牌名称
     brand_upper = brand.upper().strip()
 
+    # Logo所在目录（默认为 logos/ 子目录）
+    logo_base = Path(logo_dir) if logo_dir else Path(__file__).parent / 'logos'
+
     # 查找匹配的Logo
     for key, logo_file in brand_logo_map.items():
         if key in brand_upper:
-            if logo_dir:
-                logo_path = Path(logo_dir) / logo_file
-            else:
-                logo_path = Path(__file__).parent / logo_file
+            logo_path = logo_base / logo_file
             if logo_path.exists():
                 return str(logo_path)
 
     # 默认返回Nikon Logo
-    if logo_dir:
-        default_logo = Path(logo_dir) / 'nikon_logo.png'
-    else:
-        default_logo = Path(__file__).parent / 'nikon_logo.png'
-
+    default_logo = logo_base / 'nikon_logo.png'
     return str(default_logo) if default_logo.exists() else ''
 
 
@@ -316,7 +333,6 @@ def apply_white_border(
     image: Image.Image,
     exif_data: Dict[str, str],
     custom_text: str = '',
-    border_ratio: float = 0.08,
     logo_path: str = '',
 ) -> Image.Image:
     """
@@ -459,9 +475,11 @@ def apply_white_border(
 def apply_transparent_watermark(
     image: Image.Image,
     text: str,
-    position: str = 'bottom-right',
-    opacity: int = 128,
-    font_ratio: float = 0.03,
+    position: str = '',
+    opacity: int = 0,
+    font_ratio: float = 0.0,
+    text_color: Tuple[int, int, int] = None,
+    margin_ratio: float = 0.0,
 ) -> Image.Image:
     """
     应用半透明水印样式
@@ -472,10 +490,24 @@ def apply_transparent_watermark(
         position: 位置（top-left, top-right, bottom-left, bottom-right）
         opacity: 透明度（0-255）
         font_ratio: 字体大小比例（相对于图片宽度）
+        text_color: 文字颜色 (R, G, B)，None则使用配置默认值
+        margin_ratio: 边距比例（相对于图片宽度）
 
     Returns:
         添加水印后的图片
     """
+    # 使用配置默认值
+    if not position:
+        position = TRANSPARENT_POSITION
+    if opacity <= 0:
+        opacity = TRANSPARENT_OPACITY
+    if font_ratio <= 0:
+        font_ratio = TRANSPARENT_FONT_RATIO
+    if text_color is None:
+        text_color = TRANSPARENT_TEXT_COLOR
+    if margin_ratio <= 0:
+        margin_ratio = TRANSPARENT_MARGIN_RATIO
+
     # 创建透明图层
     overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -490,7 +522,7 @@ def apply_transparent_watermark(
     text_height = bbox[3] - bbox[1]
 
     # 计算位置（带边距）
-    margin = int(width * 0.02)
+    margin = int(width * margin_ratio)
     positions = {
         'top-left': (margin, margin),
         'top-right': (width - text_width - margin, margin),
@@ -509,7 +541,8 @@ def apply_transparent_watermark(
     )
 
     # 绘制文字
-    draw.text((x, y), text, fill=(255, 255, 255, opacity), font=font)
+    r, g, b = text_color
+    draw.text((x, y), text, fill=(r, g, b, opacity), font=font)
 
     # 合并图层
     if image.mode != 'RGBA':
@@ -524,9 +557,10 @@ def apply_color_border(
     image: Image.Image,
     exif_data: Dict[str, str],
     custom_text: str = '',
-    border_color: Tuple[int, int, int] = (0, 0, 0),
-    text_color: Tuple[int, int, int] = (255, 255, 255),
-    border_ratio: float = 0.04,
+    border_color: Tuple[int, int, int] = None,
+    text_color: Tuple[int, int, int] = None,
+    border_side_ratio: float = 0.0,
+    border_bottom_ratio: float = 0.0,
 ) -> Image.Image:
     """
     应用纯色边框+文字样式
@@ -535,16 +569,27 @@ def apply_color_border(
         image: 原始图片
         exif_data: EXIF数据
         custom_text: 自定义文字
-        border_color: 边框颜色
-        text_color: 文字颜色
-        border_ratio: 边框宽度比例
+        border_color: 边框颜色，None则使用配置默认值
+        text_color: 文字颜色，None则使用配置默认值
+        border_side_ratio: 左右两侧边框宽度比例
+        border_bottom_ratio: 底部边框宽度比例
 
     Returns:
         添加边框后的图片
     """
+    # 使用配置默认值
+    if border_color is None:
+        border_color = BORDER_FRAME_COLOR
+    if text_color is None:
+        text_color = BORDER_TEXT_COLOR
+    if border_side_ratio <= 0:
+        border_side_ratio = BORDER_SIDE_RATIO
+    if border_bottom_ratio <= 0:
+        border_bottom_ratio = BORDER_BOTTOM_RATIO
+
     width, height = image.size
-    border_size = int(width * border_ratio)
-    bottom_border = int(width * 0.08)  # 底部边框更宽
+    border_size = int(width * border_side_ratio)
+    bottom_border = int(width * border_bottom_ratio)
 
     # 计算新图片尺寸
     new_width = width + 2 * border_size
@@ -630,24 +675,24 @@ def process_single_image(
         if style == 'white':
             result = apply_white_border(
                 image, exif_data, custom_text,
-                border_ratio=kwargs.get('border_ratio', 0.06),
                 logo_path=logo_path,
             )
         elif style == 'transparent':
             result = apply_transparent_watermark(
                 image, custom_text or format_exif_text(exif_data),
-                position=kwargs.get('position', 'bottom-right'),
-                opacity=kwargs.get('opacity', 128),
-                font_ratio=kwargs.get('font_ratio', 0.03),
+                position=kwargs.get('position', ''),
+                opacity=kwargs.get('opacity', 0),
+                font_ratio=kwargs.get('font_ratio', 0.0),
+                text_color=kwargs.get('text_color', None),
+                margin_ratio=kwargs.get('margin_ratio', 0.0),
             )
         elif style == 'border':
-            border_color = kwargs.get('border_color', (0, 0, 0))
-            text_color = kwargs.get('text_color', (255, 255, 255))
             result = apply_color_border(
                 image, exif_data, custom_text,
-                border_color=border_color,
-                text_color=text_color,
-                border_ratio=kwargs.get('border_ratio', 0.04),
+                border_color=kwargs.get('border_color', None),
+                text_color=kwargs.get('text_color', None),
+                border_side_ratio=kwargs.get('border_side_ratio', 0.0),
+                border_bottom_ratio=kwargs.get('border_bottom_ratio', 0.0),
             )
         else:
             print(f"错误: 未知的样式 '{style}'")
@@ -799,18 +844,18 @@ def main():
     parser.add_argument(
         'input',
         nargs='?',
-        default='./input',
-        help='输入图片路径或文件夹路径（默认: ./input）',
+        default=DEFAULT_INPUT if DEFAULT_INPUT else None,
+        help='输入图片路径或文件夹路径（默认: config.py配置，留空则弹出选择）',
     )
     parser.add_argument(
         '-o', '--output',
-        default='./output',
-        help='输出路径（默认: ./output）',
+        default=DEFAULT_OUTPUT if DEFAULT_OUTPUT else None,
+        help='输出路径（默认: config.py配置，留空则在输入路径同级创建output文件夹）',
     )
     parser.add_argument(
         '-s', '--style',
         choices=['white', 'transparent', 'border'],
-        default='white',
+        default=DEFAULT_STYLE,
         help='边框样式: white(白底黑字), transparent(半透明), border(纯色边框)',
     )
     parser.add_argument(
@@ -821,42 +866,47 @@ def main():
     parser.add_argument(
         '-p', '--position',
         choices=['top-left', 'top-right', 'bottom-left', 'bottom-right'],
-        default='bottom-right',
+        default=TRANSPARENT_POSITION,
         help='半透明水印的位置',
     )
     parser.add_argument(
         '--border-color',
-        default='black',
-        help='边框颜色（black/white/gray或RGB格式如255,255,255）',
+        default=None,
+        help='边框颜色（black/white/gray或RGB格式如255,255,255），默认使用config.py配置',
     )
     parser.add_argument(
         '--text-color',
-        default='white',
-        help='文字颜色',
+        default=None,
+        help='文字颜色，默认使用config.py配置',
     )
     parser.add_argument(
         '--opacity',
         type=int,
-        default=128,
+        default=TRANSPARENT_OPACITY,
         help='半透明水印的透明度（0-255）',
     )
     parser.add_argument(
         '--quality',
         type=int,
-        default=95,
+        default=JPEG_QUALITY,
         help='JPEG输出质量（1-100）',
     )
     parser.add_argument(
         '--logo',
-        default=str(Path(__file__).parent / 'nikon_logo.png'),
+        default=str(Path(__file__).parent / 'logos' / 'nikon_logo.png'),
         help='Logo图片路径（默认: nikon_logo.png）',
     )
 
     args = parser.parse_args()
 
-    # 检查输入路径，不存在时弹出文件夹选择对话框
-    input_path = Path(args.input)
-    if not input_path.exists():
+    # 检查输入路径
+    # 如果args.input为None（config.py中DEFAULT_INPUT为空且未指定命令行参数），直接弹出选择
+    # 如果args.input有值但路径不存在，也弹出选择
+    input_path = None
+    if args.input:
+        input_path = Path(args.input)
+
+    if input_path is None or not input_path.exists():
         try:
             import tkinter as tk
             from tkinter import filedialog
@@ -866,8 +916,10 @@ def main():
             root.withdraw()
             root.attributes('-topmost', True)
 
+            if input_path and not input_path.exists():
+                print(f"路径不存在: {args.input}")
+
             # 询问用户选择文件还是文件夹
-            print(f"路径不存在: {args.input}")
             print("请选择要处理的内容：")
             print("1. 选择单张图片")
             print("2. 选择文件夹（批量处理）")
@@ -902,12 +954,12 @@ def main():
             print(f"已选择: {input_path}")
 
         except ImportError:
-            print(f"错误: 输入路径不存在 - {args.input}")
+            print(f"错误: 未指定输入路径，请通过命令行参数或config.py设置DEFAULT_INPUT")
             sys.exit(1)
 
-    # 解析颜色
-    border_color = parse_color(args.border_color)
-    text_color = parse_color(args.text_color)
+    # 解析颜色（None表示使用config.py默认值）
+    border_color = parse_color(args.border_color) if args.border_color else None
+    text_color = parse_color(args.text_color) if args.text_color else None
 
     # 准备参数
     kwargs = {
