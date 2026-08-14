@@ -2377,8 +2377,8 @@ def main():
 
         elif input_path.is_file():
             # 单张图片处理
-            # 智能样式：按照片方向自动选择（竖版照片避免白条样式过粗）
-            if SMART_STYLE == 'auto':
+            # 智能样式：仅当用户只选了一个样式时按方向自动选择（多选时尊重用户选择）
+            if SMART_STYLE == 'auto' and len(args.style.split(',')) == 1:
                 args.style = get_smart_style(str(input_path))
                 print(f"  智能样式: {args.style}（根据照片方向）")
             if args.output:
