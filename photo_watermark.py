@@ -1526,13 +1526,23 @@ def update_ini_value(section: str, key: str, value_str: str) -> bool:
             m = re.search(r'(\s+#.*)$', line)
             if m:
                 comment = m.group(1)
-            lines[i] = f'{key} = {value_str}{comment}'
+            # 空值不留尾随空格
+            if value_str:
+                lines[i] = f'{key} = {value_str}{comment}'
+            else:
+                lines[i] = f'{key} ={comment}'
             try:
                 ini_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
             except Exception:
                 return False
             return True
     return False
+
+
+def fmt_float(value: float) -> str:
+    """浮点格式化为ini值：去掉多余的尾随零（0.080 -> 0.08, 1.000 -> 1）"""
+    s = f"{value:.3f}".rstrip('0').rstrip('.')
+    return s if s else '0'
 
 
 def refresh_globals_from_ini():
@@ -1657,13 +1667,13 @@ def open_settings_window(parent=None) -> bool:
         update_ini_value('基础设置', 'JPEG质量', str(v_quality.get()))
         update_ini_value('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0)))
         update_ini_value('基础设置', '居中Logo透明度', str(v_center_alpha.get()))
-        update_ini_value('基础设置', '居中Logo大小', f"{v_center_ratio.get() / 1000:.3f}")
+        update_ini_value('基础设置', '居中Logo大小', fmt_float(v_center_ratio.get() / 1000))
         update_ini_value('基础设置', '自动打开输出', '是' if v_auto.get() else '否')
         update_ini_value('基础设置', '显示控制台窗口', '是' if v_console.get() else '否')
-        update_ini_value('白条边框', '边框高度', f"{v_strip_h.get() / 1000:.3f}")
+        update_ini_value('白条边框', '边框高度', fmt_float(v_strip_h.get() / 1000))
         update_ini_value('半透明水印', '位置', v_pos.get())
         update_ini_value('半透明水印', '透明度', str(v_alpha.get()))
-        update_ini_value('半透明水印', '字体大小', f"{v_font.get() / 1000:.3f}")
+        update_ini_value('半透明水印', '字体大小', fmt_float(v_font.get() / 1000))
         update_ini_value('颜色设置', '边框颜色', v_border_color.get())
         update_ini_value('颜色设置', '边框文字颜色', v_border_text.get())
         refresh_globals_from_ini()
