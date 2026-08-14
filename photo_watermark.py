@@ -1523,15 +1523,6 @@ def open_settings_window(parent=None) -> bool:
     saved = {'flag': False}
 
     # ===== 配置变量 =====
-    # 品牌列表（显示名, 配置值）；空值=自动识别
-    BRAND_OPTIONS = [
-        ('自动', ''), ('尼康', 'NIKON'), ('佳能', 'CANON'), ('索尼', 'SONY'),
-        ('富士', 'FUJI'), ('哈苏', 'HASSELBLAD'), ('奥林巴斯', 'OLYMPUS'),
-        ('宾得', 'PENTAX'), ('松下', 'PANASONIC'), ('小米', 'XIAOMI'),
-        ('华为', 'HUAWEI'), ('荣耀', 'HONOR'), ('苹果', 'APPLE'),
-        ('大疆', 'DJI'), ('三星', 'SAMSUNG'), ('谷歌', 'GOOGLE'),
-        ('vivo', 'VIVO'), ('OPPO', 'OPPO'),
-    ]
     _brand_code = {n: c for n, c in BRAND_OPTIONS}
     _brand_name = {c: n for n, c in BRAND_OPTIONS}
     v_brand = tk.StringVar(value=_brand_name.get(DEFAULT_BRAND.upper(), '自动'))
@@ -1678,6 +1669,16 @@ STYLE_OPTIONS = [
     ('blur', '模糊边框', '边缘模糊背景，效果自然'),
 ]
 
+# 品牌选项（显示名, 配置值）；空值=自动识别EXIF品牌
+# 用于设置窗口（全局默认）和选择窗口（本次处理强制指定）
+BRAND_OPTIONS = [
+    ('自动', ''), ('尼康', 'NIKON'), ('佳能', 'CANON'), ('索尼', 'SONY'),
+    ('富士', 'FUJI'), ('哈苏', 'HASSELBLAD'), ('徕卡', 'LEICA'), ('奥林巴斯', 'OLYMPUS'),
+    ('宾得', 'PENTAX'), ('理光', 'RICOH'), ('松下', 'PANASONIC'), ('小米', 'XIAOMI'),
+    ('华为', 'HUAWEI'), ('荣耀', 'HONOR'), ('苹果', 'APPLE'), ('大疆', 'DJI'),
+    ('三星', 'SAMSUNG'), ('谷歌', 'GOOGLE'), ('vivo', 'VIVO'), ('OPPO', 'OPPO'),
+]
+
 
 def choose_style_gui(default_style: str = '') -> str:
     """
@@ -1687,7 +1688,7 @@ def choose_style_gui(default_style: str = '') -> str:
         default_style: 默认勾选的样式（逗号分隔多选）
 
     Returns:
-        选中的样式字符串（逗号分隔）；用户取消返回 ''
+        (样式字符串, 品牌代码)；用户取消返回 ('', '')
     """
     import tkinter as tk
     from tkinter import ttk, font as tkfont
@@ -1716,11 +1717,15 @@ def choose_style_gui(default_style: str = '') -> str:
     for key, _, _ in STYLE_OPTIONS:
         style_vars[key] = tk.BooleanVar(value=(key in default_styles))
 
-    result = {'style': ''}
+    _brand_code = {n: c for n, c in BRAND_OPTIONS}
+    brand_var = tk.StringVar(value='自动')
+
+    result = {'style': '', 'brand': ''}
 
     def confirm():
         checked = [k for k, _, _ in STYLE_OPTIONS if style_vars[k].get()]
         result['style'] = ','.join(checked) if checked else 'strip'
+        result['brand'] = _brand_code.get(brand_var.get(), '')
         root.destroy()
 
     # 布局
@@ -1739,6 +1744,16 @@ def choose_style_gui(default_style: str = '') -> str:
         ttk.Checkbutton(cell, text=label, variable=style_vars[key]).pack(anchor='w')
         ttk.Label(cell, text=desc, foreground='#808080', font=small_font).pack(anchor='w', padx=(20, 0))
 
+    # 品牌Logo行（本次处理强制指定）
+    brand_row = ttk.Frame(frame)
+    brand_row.pack(fill='x', pady=(0, 12))
+    ttk.Label(brand_row, text="品牌Logo:").pack(side='left', padx=(2, 6))
+    ttk.Combobox(brand_row, textvariable=brand_var,
+                 values=[n for n, _ in BRAND_OPTIONS],
+                 state='readonly', width=14).pack(side='left')
+    ttk.Label(brand_row, text="（自动=按EXIF识别）", foreground='#808080',
+              font=small_font).pack(side='left', padx=8)
+
     btns = ttk.Frame(frame)
     btns.pack()
     ttk.Button(btns, text="开始处理", command=confirm, width=14).pack(side='left', padx=6)
@@ -1753,7 +1768,7 @@ def choose_style_gui(default_style: str = '') -> str:
     root.geometry(f"{w}x{h}+{x}+{y}")
 
     root.mainloop()
-    return result['style']
+    return result['style'], result['brand']
 
 
 def select_paths_gui() -> tuple:
@@ -1795,7 +1810,7 @@ def select_paths_gui() -> tuple:
     small_font = base_font.copy()
     small_font.configure(size=9)
 
-    result = {'paths': None, 'style': ''}
+    result = {'paths': None, 'style': '', 'brand': ''}
 
     # 水印样式选项（可多选，默认勾选配置中的样式）
     styles = STYLE_OPTIONS
@@ -1803,6 +1818,10 @@ def select_paths_gui() -> tuple:
     style_vars = {}
     for key, _, _ in styles:
         style_vars[key] = tk.BooleanVar(value=(key in default_styles))
+
+    # 品牌Logo选择（本次处理强制使用，自动=按EXIF品牌识别）
+    _brand_code = {n: c for n, c in BRAND_OPTIONS}
+    brand_var = tk.StringVar(value='自动')
 
     def get_style():
         checked = [k for k, _, _ in styles if style_vars[k].get()]
@@ -1821,6 +1840,7 @@ def select_paths_gui() -> tuple:
         if files:
             result['paths'] = list(files)
             result['style'] = get_style()
+            result['brand'] = _brand_code.get(brand_var.get(), '')
             root.destroy()
 
     def pick_folder():
@@ -1831,6 +1851,7 @@ def select_paths_gui() -> tuple:
         if folder:
             result['paths'] = [folder]
             result['style'] = get_style()
+            result['brand'] = _brand_code.get(brand_var.get(), '')
             root.destroy()
 
     def open_settings():
@@ -1883,10 +1904,21 @@ def select_paths_gui() -> tuple:
     # 照片选择区
     pf = ttk.LabelFrame(frame, text=" 选择要处理的照片 ", padding=10)
     pf.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 10))
-    ttk.Button(pf, text="选择照片（可多选）", command=pick_files,
+    btns_row = ttk.Frame(pf)
+    btns_row.pack(fill='x')
+    ttk.Button(btns_row, text="选择照片（可多选）", command=pick_files,
                style='Primary.TButton').pack(side='left', padx=6)
-    ttk.Button(pf, text="选择文件夹（批量处理）", command=pick_folder,
+    ttk.Button(btns_row, text="选择文件夹（批量处理）", command=pick_folder,
                style='Primary.TButton').pack(side='left', padx=6)
+    # 品牌Logo行（本次处理强制指定，自动=按EXIF识别）
+    brand_row = ttk.Frame(pf)
+    brand_row.pack(fill='x', pady=(8, 0))
+    ttk.Label(brand_row, text="品牌Logo:").pack(side='left', padx=(6, 4))
+    ttk.Combobox(brand_row, textvariable=brand_var,
+                 values=[n for n, _ in BRAND_OPTIONS],
+                 state='readonly', width=14).pack(side='left')
+    ttk.Label(brand_row, text="（选「哈苏」等可强制使用该品牌Logo）",
+              style='Desc.TLabel').pack(side='left', padx=8)
 
     # 底部按钮
     btm = ttk.Frame(frame)
@@ -1898,14 +1930,14 @@ def select_paths_gui() -> tuple:
 
     # 窗口居中显示，并保证足够大
     root.update_idletasks()
-    w = max(root.winfo_reqwidth(), 520)
+    w = max(root.winfo_reqwidth(), 540)
     h = root.winfo_reqheight()
     x = (root.winfo_screenwidth() - w) // 2
     y = (root.winfo_screenheight() - h) // 3
     root.geometry(f"{w}x{h}+{x}+{y}")
 
     root.mainloop()
-    return result['paths'] or [], result['style']
+    return result['paths'] or [], result['style'], result['brand']
 
 
 def notify(title: str, message: str, is_error: bool = False):
@@ -2116,9 +2148,11 @@ def main():
                 multi_dirs = dirs
 
     # 无有效输入 → 弹出图形界面选择照片/文件夹
+    gui_brand = ''  # GUI中选择的强制品牌Logo（本次处理生效）
+    drag_brand = ''  # 拖拽弹窗中选择的强制品牌Logo
     if not input_path and not multi_files and not multi_dirs:
         try:
-            selected, selected_style = select_paths_gui()
+            selected, selected_style, gui_brand = select_paths_gui()
         except ImportError:
             print("错误: 未指定输入路径，请通过命令行参数或在 水印设置.ini 中设置「默认输入路径」")
             sys.exit(1)
@@ -2146,9 +2180,10 @@ def main():
     if total_inputs > 1 and not style_explicit and not gui_mode:
         print(f"收到 {total_inputs} 个路径，请选择水印样式...")
         try:
-            style_choice = choose_style_gui(args.style)
+            style_choice, drag_brand = choose_style_gui(args.style)
         except ImportError:
             style_choice = ''
+            drag_brand = ''
         if style_choice:
             args.style = style_choice
             print(f"已选择样式: {args.style}")
@@ -2176,6 +2211,10 @@ def main():
         'quality': args.quality,
         'logo_path': args.logo,
     }
+    # GUI/拖拽弹窗中强制指定的品牌Logo（本次处理覆盖自动识别）
+    if gui_brand or drag_brand:
+        kwargs['logo_path'] = gui_brand or drag_brand
+        print(f"强制品牌Logo: {kwargs['logo_path']}")
 
     # 显示当前使用的配置
     print(f"[配置] 当前配置:")
@@ -2356,7 +2395,7 @@ def main():
         print()
         print("处理完成！可继续选择其他照片（点「取消」退出）")
         try:
-            selected, selected_style = select_paths_gui()
+            selected, selected_style, selected_brand = select_paths_gui()
         except ImportError:
             break
         if not selected:
@@ -2364,6 +2403,8 @@ def main():
             break
         if selected_style:
             args.style = selected_style
+        if selected_brand:
+            kwargs['logo_path'] = selected_brand  # 本次处理强制品牌Logo
         if len(selected) == 1:
             input_path = Path(selected[0])
             multi_files = None
