@@ -48,3 +48,6 @@ Thumbs.db
 
 # Reference repos (cloned for study, not part of this project)
 Reference/
+
+# 个人设置（由程序设置窗口自动生成，不提交）
+用户设置.ini

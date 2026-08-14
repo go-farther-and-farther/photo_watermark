@@ -50,16 +50,30 @@ def get_base_dir() -> Path:
 
 
 def load_ini_config() -> configparser.ConfigParser:
-    """加载 .ini 配置文件"""
-    config = configparser.ConfigParser()
-    ini_path = get_base_dir() / '水印设置.ini'
+    """
+    加载配置：默认配置（水印设置.ini）+ 个人配置（用户设置.ini）
 
-    if ini_path.exists():
+    个人配置后加载，覆盖默认配置；个人配置不存在时全部用默认值。
+    这样更新程序时个人设置保留在 用户设置.ini 中，不会被新版默认配置覆盖。
+    """
+    config = configparser.ConfigParser()
+    default_path = get_base_dir() / '水印设置.ini'
+    user_path = get_base_dir() / '用户设置.ini'
+
+    if default_path.exists():
         try:
-            config.read(ini_path, encoding='utf-8')
-            print(f"[OK] 已加载配置: {ini_path.name}")
+            config.read(default_path, encoding='utf-8')
+            print(f"[OK] 已加载默认配置: {default_path.name}")
         except Exception as e:
-            print(f"[警告] 配置文件读取失败: {e}")
+            print(f"[警告] 默认配置读取失败: {e}")
+
+    if user_path.exists():
+        try:
+            config.read(user_path, encoding='utf-8')  # 后读覆盖先读
+            print(f"[OK] 已加载个人配置: {user_path.name}")
+        except Exception as e:
+            print(f"[警告] 个人配置读取失败: {e}")
+
     return config
 
 
@@ -1495,7 +1509,10 @@ def color_to_name(color: Tuple[int, int, int]) -> str:
 
 def update_ini_value(section: str, key: str, value_str: str) -> bool:
     """
-    更新 水印设置.ini 中的某个键值（逐行替换，保留文件中的注释）
+    保存设置到个人配置文件（用户设置.ini）
+
+    不修改默认配置（水印设置.ini），这样更新程序时个人设置不会丢失；
+    用户设置.ini 不存在时自动创建。
 
     Args:
         section: 配置段（如 基础设置）
@@ -1503,40 +1520,27 @@ def update_ini_value(section: str, key: str, value_str: str) -> bool:
         value_str: 新值（字符串形式）
 
     Returns:
-        是否更新成功
+        是否保存成功
     """
-    ini_path = get_base_dir() / '水印设置.ini'
-    if not ini_path.exists():
-        return False
+    user_path = get_base_dir() / '用户设置.ini'
     try:
-        lines = ini_path.read_text(encoding='utf-8').splitlines()
-    except Exception:
+        cp = configparser.ConfigParser()
+        if user_path.exists():
+            cp.read(user_path, encoding='utf-8')
+        if not cp.has_section(section):
+            cp.add_section(section)
+        cp.set(section, key, value_str)
+        user_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(user_path, 'w', encoding='utf-8') as f:
+            f.write('# ==========================================\n')
+            f.write('# 个人设置（由程序设置窗口自动生成，无需手动编辑）\n')
+            f.write('# 此文件不会被程序更新覆盖，请放心使用\n')
+            f.write('# ==========================================\n')
+            cp.write(f)
+        return True
+    except Exception as e:
+        print(f"[警告] 保存个人配置失败: {e}")
         return False
-
-    key_re = re.compile(rf'^\s*{re.escape(key)}\s*=')
-    current_section = ''
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith('[') and stripped.endswith(']'):
-            current_section = stripped[1:-1].strip()
-            continue
-        if current_section == section and key_re.match(line):
-            # 保留行尾注释
-            comment = ''
-            m = re.search(r'(\s+#.*)$', line)
-            if m:
-                comment = m.group(1)
-            # 空值不留尾随空格
-            if value_str:
-                lines[i] = f'{key} = {value_str}{comment}'
-            else:
-                lines[i] = f'{key} ={comment}'
-            try:
-                ini_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-            except Exception:
-                return False
-            return True
-    return False
 
 
 def fmt_float(value: float) -> str:
