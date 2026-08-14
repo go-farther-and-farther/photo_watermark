@@ -1,0 +1,51 @@
+name: Build & Release
+
+# 触发方式：
+# 1. 推送 v 开头的 tag（如 v1.5.0）：git tag v1.5.0 && git push --tags
+# 2. GitHub 页面 Actions → Build & Release → Run workflow（手动触发）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build exe (onefile)
+        run: pyinstaller --onefile --name photo_watermark photo_watermark.py
+
+      - name: Package release zip (exe + config + ini + logos)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist/photo_watermark.exe release/
+          Copy-Item config.py release/
+          Copy-Item -LiteralPath 水印设置.ini release/
+          Copy-Item logos release/logos -Recurse
+          $zipName = "photo_watermark-${{ github.ref_name }}-win64.zip"
+          Compress-Archive -Path release/* -DestinationPath $zipName
+          Write-Host "Created $zipName"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: photo_watermark-*.zip
+          generate_release_notes: true
