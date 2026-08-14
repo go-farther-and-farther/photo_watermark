@@ -195,8 +195,8 @@ BLUR_INTENSITY = get_config_value('模糊边框', '模糊强度', BLUR_INTENSITY
 BLUR_CORNER_RADIUS = get_config_value('模糊边框', '圆角大小', BLUR_CORNER_RADIUS if 'BLUR_CORNER_RADIUS' in dir() else 0.03, 'float')
 BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SHADOW if 'BLUR_TEXT_SHADOW' in dir() else True, 'bool')
 
-# 智能样式
-SMART_STYLE = get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool')
+# 智能样式（'auto'=按照片方向自动选样式，'off'=固定用默认样式）
+SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool') else 'off'
 LANDSCAPE_STYLE = get_config_value('智能样式', '横版样式', LANDSCAPE_STYLE if 'LANDSCAPE_STYLE' in dir() else 'strip')
 PORTRAIT_STYLE = get_config_value('智能样式', '竖版样式', PORTRAIT_STYLE if 'PORTRAIT_STYLE' in dir() else 'blur')
 SQUARE_STYLE = get_config_value('智能样式', '方形样式', SQUARE_STYLE if 'SQUARE_STYLE' in dir() else 'transparent')
@@ -700,7 +700,8 @@ def apply_white_border(
         添加边框后的图片
     """
     width, height = image.size
-    border_height = int(height * BORDER_HEIGHT_RATIO)
+    # 边框高度按短边计算：竖版照片白条不会过粗（与横版比例一致）
+    border_height = int(min(width, height) * BORDER_HEIGHT_RATIO)
 
     # ========== 使用全局布局参数 ==========
     left_margin = int(width * LEFT_MARGIN_RATIO)
@@ -1237,6 +1238,21 @@ def process_single_image(
         # 解析样式列表（支持逗号分隔多选，分别输出）
         styles = [s.strip() for s in style.split(',') if s.strip()]
 
+        # 智能样式：按照片方向自动选择（需在旋转后判断；多样式时不覆盖用户选择）
+        force_name = False
+        if SMART_STYLE == 'auto' and len(styles) == 1:
+            ratio = image.width / image.height
+            if ratio > 1.2:
+                resolved = LANDSCAPE_STYLE
+            elif ratio < 0.8:
+                resolved = PORTRAIT_STYLE
+            else:
+                resolved = SQUARE_STYLE
+            if resolved != styles[0]:
+                print(f"  [智能样式] 照片方向({image.width}x{image.height}) 自动使用「{resolved}」样式")
+                styles = [resolved]
+                force_name = True  # 文件名用实际样式，避免名实不符
+
         # 从kwargs中移除logo_path，避免重复传递
         kwargs_clean = {k: v for k, v in kwargs.items() if k != 'logo_path'}
 
@@ -1248,8 +1264,8 @@ def process_single_image(
         processed_count = 0
         for i, single_style in enumerate(styles):
             # 为每个样式生成独立的文件名
-            if len(styles) > 1:
-                # 多样式时，文件名包含样式名
+            if len(styles) > 1 or force_name:
+                # 多样式/智能样式切换时，文件名包含实际样式名
                 style_output_name = OUTPUT_FILENAME_FORMAT.format(
                     name=Path(input_path).stem,
                     style=single_style,
@@ -1388,7 +1404,7 @@ def batch_process(
 
 def get_smart_style(image_path: str) -> str:
     """
-    根据照片方向智能选择水印样式
+    根据照片方向智能选择水印样式（考虑EXIF旋转方向后的真实宽高）
 
     Args:
         image_path: 图片路径
@@ -1397,7 +1413,9 @@ def get_smart_style(image_path: str) -> str:
         样式名称
     """
     try:
+        from PIL import ImageOps
         with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)  # 应用EXIF方向，得到真实宽高
             width, height = img.size
             ratio = width / height
 
@@ -1471,11 +1489,12 @@ def refresh_globals_from_ini():
     global _ini_config, DEFAULT_STYLE, DEFAULT_TEXT, JPEG_QUALITY, JPEG_SUBSAMPLING, AUTO_OPEN_OUTPUT, \
         SHOW_CONSOLE_WINDOW, BORDER_BACKGROUND_IMAGE, BORDER_BACKGROUND_OPACITY, \
         TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
-        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND
+        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
     DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND)
+    SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', False, 'bool') else 'off'
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
     JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING, 'int')
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
@@ -1544,6 +1563,7 @@ def open_settings_window(parent=None) -> bool:
     v_border_text = tk.StringVar(value=color_to_name(BORDER_TEXT_COLOR))
     v_auto = tk.BooleanVar(value=bool(AUTO_OPEN_OUTPUT))
     v_console = tk.BooleanVar(value=bool(SHOW_CONSOLE_WINDOW))
+    v_smart = tk.BooleanVar(value=(SMART_STYLE == 'auto'))
 
     def add_scale(parent, row, label, var, frm, to, fmt, divisor=1):
         """一行：文字 + 滑杆 + 实时数值"""
@@ -1576,6 +1596,7 @@ def open_settings_window(parent=None) -> bool:
         update_ini_value('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0)))
         update_ini_value('基础设置', '自动打开输出', '是' if v_auto.get() else '否')
         update_ini_value('基础设置', '显示控制台窗口', '是' if v_console.get() else '否')
+        update_ini_value('智能样式', '启用智能样式', '是' if v_smart.get() else '否')
         update_ini_value('白条边框', '边框高度', fmt_float(v_strip_h.get() / 1000))
         update_ini_value('半透明水印', '位置', v_pos.get())
         update_ini_value('半透明水印', '透明度', str(v_alpha.get()))
@@ -1641,6 +1662,8 @@ def open_settings_window(parent=None) -> bool:
         row=3, column=0, columnspan=3, sticky='w', pady=2)
     ttk.Checkbutton(f4, text="显示控制台窗口（exe）", variable=v_console).grid(
         row=4, column=0, columnspan=3, sticky='w', pady=2)
+    ttk.Checkbutton(f4, text="智能样式（竖版自动用模糊边框）", variable=v_smart).grid(
+        row=5, column=0, columnspan=3, sticky='w', pady=2)
 
     # 按钮
     btns = ttk.Frame(outer)
@@ -2354,6 +2377,10 @@ def main():
 
         elif input_path.is_file():
             # 单张图片处理
+            # 智能样式：按照片方向自动选择（竖版照片避免白条样式过粗）
+            if SMART_STYLE == 'auto':
+                args.style = get_smart_style(str(input_path))
+                print(f"  智能样式: {args.style}（根据照片方向）")
             if args.output:
                 output_path = args.output
             else:
