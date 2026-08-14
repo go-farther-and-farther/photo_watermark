@@ -528,7 +528,8 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
         'OM DIGITAL': 'olympus_logo.png',  # OM System（前身奥林巴斯）
         'OM SYSTEM': 'olympus_logo.png',   # OM System
         'PENTAX': 'pentax_logo.png',
-        'RICOH': 'pentax_logo.png',        # 宾得已被理光收购
+        'RICOH': 'ricoh_logo.png',           # 理光独立Logo
+        'LEICA': 'leica_logo.png',           # 徕卡
         'PANASONIC': 'panasonic_logo.png',
         # 手机/无人机品牌（可自行放入对应 logo 文件）
         'XIAOMI': 'xiaomi_logo.png',

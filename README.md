@@ -164,6 +164,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 | Olympus / OM System | `olympus_logo.png` | 三星 | `samsung_logo.png` |
 | Pentax | `pentax_logo.png` | 谷歌 | `google_logo.png` |
 | Panasonic | `panasonic_logo.png` | vivo / OPPO | `vivo_logo.png` / `oppo_logo.png` |
+| Ricoh | `ricoh_logo.png` | 徕卡 | `leica_logo.png` |
 
 - 未匹配到品牌或 Logo 文件缺失时不使用 Logo（不影响水印文字）
 - 手机/无人机品牌的 Logo 文件可自行放入 `logos/` 文件夹（如 `xiaomi_logo.png`）
