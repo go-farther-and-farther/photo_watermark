@@ -52,12 +52,6 @@ BORDER_BACKGROUND_IMAGE = ''
 # 边框背景图透明度 (0-255)，255=完全不透明，128=半透明（推荐），越小越透
 BORDER_BACKGROUND_OPACITY = 128
 
-# 居中Logo水印（center样式）Logo透明度 (0-255)，100=半透明
-CENTER_LOGO_OPACITY = 100
-
-# 居中Logo水印（center样式）Logo高度占图片高度的比例（0.05-0.30），0.12=适中
-CENTER_LOGO_RATIO = 0.12
-
 # 字体设置
 FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
 

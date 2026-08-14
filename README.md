@@ -14,12 +14,11 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **五种水印样式**
+- **四种水印样式**
   - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
   - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
-  - `center` — 居中Logo水印（品牌Logo半透明居中，可加签名）
 
 - **自定义边框背景图**
   - 可自由选择一张图片作为水印边框的背景（strip/纯色边框样式生效）
@@ -122,9 +121,6 @@ photo_watermark.exe input.jpg --style border --border-color black
 
 # 模糊边框（推荐，效果自然）
 photo_watermark.exe input.jpg --style blur
-
-# 居中Logo水印
-photo_watermark.exe input.jpg --style center --text "©摄影师"
 ```
 
 ### 自定义文字
@@ -143,7 +139,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 |------|------|--------|
 | `input` | 输入图片或文件夹路径 | 留空则弹出窗口选择（`水印设置.ini` 可设置默认路径） |
 | `-o, --output` | 输出路径 | `config.py` 配置（留空则自动命名） |
-| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` / `center` | `config.py` 配置 |
+| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` | `config.py` 配置 |
 | `-t, --text` | 自定义水印文字 | 无 |
 | `-p, --position` | 半透明水印位置：`top-left` / `top-right` / `bottom-left` / `bottom-right` | `config.py` 配置 |
 | `--border-color` | 边框颜色（`black`/`white`/`gray` 或 RGB 如 `255,255,255`） | `config.py` 配置 |
@@ -190,7 +186,7 @@ exe 用户只需要 `config.py`、`水印设置.ini`、`logos/` 与 exe 放一�
 ### 通用设置
 
 ```python
-DEFAULT_STYLE = 'strip'         # 默认水印样式：strip / transparent / border / blur / center
+DEFAULT_STYLE = 'strip'         # 默认水印样式：strip / transparent / border / blur
 DEFAULT_INPUT = ''              # 默认输入路径（留空则弹出窗口选择）
 DEFAULT_OUTPUT = ''             # 默认输出路径（留空则自动处理，见下表）
 JPEG_QUALITY = 95               # JPEG输出质量 (1-100)
@@ -199,8 +195,6 @@ FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
 SHOW_CONSOLE_WINDOW = False     # 是否显示控制台窗口（exe模式生效，False=隐藏黑窗口）
 BORDER_BACKGROUND_IMAGE = ''    # 边框背景图路径（留空=纯色背景）
 BORDER_BACKGROUND_OPACITY = 128 # 边框背景图透明度 (0-255)，128=半透明
-CENTER_LOGO_OPACITY = 100       # 居中Logo水印透明度 (0-255)
-CENTER_LOGO_RATIO = 0.12        # 居中Logo大小（占图片高度比例，0.05-0.30）
 ```
 
 **路径配置说明：**

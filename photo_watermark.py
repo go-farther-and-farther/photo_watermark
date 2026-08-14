@@ -144,8 +144,6 @@ AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_O
 SHOW_CONSOLE_WINDOW = get_config_value('基础设置', '显示控制台窗口', SHOW_CONSOLE_WINDOW if 'SHOW_CONSOLE_WINDOW' in dir() else False, 'bool')
 BORDER_BACKGROUND_IMAGE = get_config_value('基础设置', '边框背景图', BORDER_BACKGROUND_IMAGE if 'BORDER_BACKGROUND_IMAGE' in dir() else '')
 BORDER_BACKGROUND_OPACITY = get_config_value('基础设置', '边框背景图透明度', BORDER_BACKGROUND_OPACITY if 'BORDER_BACKGROUND_OPACITY' in dir() else 128, 'int')
-CENTER_LOGO_OPACITY = get_config_value('基础设置', '居中Logo透明度', CENTER_LOGO_OPACITY if 'CENTER_LOGO_OPACITY' in dir() else 100, 'int')
-CENTER_LOGO_RATIO = get_config_value('基础设置', '居中Logo大小', CENTER_LOGO_RATIO if 'CENTER_LOGO_RATIO' in dir() else 0.12, 'float')
 DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND if 'DEFAULT_BRAND' in dir() else '')
 DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT if 'DEFAULT_TEXT' in dir() else '')
 
@@ -248,10 +246,6 @@ if 'BORDER_BACKGROUND_IMAGE' not in dir():
     BORDER_BACKGROUND_IMAGE = ''
 if 'BORDER_BACKGROUND_OPACITY' not in dir():
     BORDER_BACKGROUND_OPACITY = 128
-if 'CENTER_LOGO_OPACITY' not in dir():
-    CENTER_LOGO_OPACITY = 100
-if 'CENTER_LOGO_RATIO' not in dir():
-    CENTER_LOGO_RATIO = 0.12
 if 'DEFAULT_BRAND' not in dir():
     DEFAULT_BRAND = ''
 
@@ -1114,79 +1108,6 @@ def apply_blur_border(
     return new_image
 
 
-def apply_center_logo(
-    image: Image.Image,
-    exif_data: Dict[str, str],
-    custom_text: str = '',
-    logo_path: str = '',
-) -> Image.Image:
-    """
-    应用居中Logo水印样式
-
-    布局：
-    - 品牌 Logo 居中显示，高度约为图片高度的 CENTER_LOGO_RATIO（默认12%），半透明
-    - 自定义文字显示在 Logo 下方（白色带阴影）
-
-    Args:
-        image: 原始图片
-        exif_data: EXIF数据
-        custom_text: 自定义文字（可选）
-        logo_path: logo图片路径（可选）
-
-    Returns:
-        添加水印后的图片
-    """
-    result = image.convert('RGBA') if image.mode != 'RGBA' else image.copy()
-    width, height = image.size
-    draw = ImageDraw.Draw(result, 'RGBA')
-
-    # Logo 大小：高度约为图片高度的 CENTER_LOGO_RATIO，保持比例（不能太大）
-    logo = None
-    if logo_path and Path(logo_path).exists():
-        try:
-            logo = Image.open(logo_path).convert('RGBA')
-            logo_height = max(24, int(height * CENTER_LOGO_RATIO))
-            ratio = logo_height / logo.height
-            logo = logo.resize((max(24, int(logo.width * ratio)), logo_height), Image.Resampling.LANCZOS)
-        except Exception as e:
-            print(f"  [警告] Logo加载失败: {e}")
-            logo = None
-
-    # 自定义文字（Logo 下方），字号与 logo 大小匹配
-    text = custom_text or ''
-    font = get_font(max(16, int(height * 0.02))) if text else None
-    text_height = 0
-    if text and font:
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_height = bbox[3] - bbox[1]
-
-    # 整体垂直居中
-    block_height = (logo.height if logo else 0) + (text_height + 12 if text else 0)
-    start_y = max(0, (height - block_height) // 2)
-
-    # 半透明 Logo
-    if logo:
-        alpha = max(0, min(255, CENTER_LOGO_OPACITY)) / 255.0
-        r, g, b, a = logo.split()
-        a = a.point(lambda p: int(p * alpha))
-        logo.putalpha(a)
-        x = (width - logo.width) // 2
-        result.paste(logo, (x, start_y), logo)
-        print(f"  居中Logo: {Path(logo_path).name} (尺寸: {logo.width}x{logo.height}, 透明度: {int(alpha * 255)})")
-
-    # 文字（白色 + 阴影）
-    if text and font:
-        y = start_y + (logo.height if logo else 0) + 12
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (width - text_width) // 2
-        shadow_offset = max(1, font.size // 15)
-        draw.text((x + shadow_offset, y + shadow_offset), text, fill=(0, 0, 0, 160), font=font)
-        draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
-
-    return result.convert('RGB')
-
-
 def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs):
     """
     应用单个水印样式
@@ -1242,11 +1163,6 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             blur_intensity=kwargs.get('blur_intensity', 0),
             text_color=kwargs.get('text_color', None),
             text_shadow=kwargs.get('text_shadow', True),
-        )
-    elif style == 'center':
-        return apply_center_logo(
-            image, exif_data, custom_text,
-            logo_path=logo_path,
         )
     else:
         print(f"  [警告] 未知样式: {style}")
@@ -1554,13 +1470,11 @@ def refresh_globals_from_ini():
     global _ini_config, DEFAULT_STYLE, DEFAULT_TEXT, JPEG_QUALITY, JPEG_SUBSAMPLING, AUTO_OPEN_OUTPUT, \
         SHOW_CONSOLE_WINDOW, BORDER_BACKGROUND_IMAGE, BORDER_BACKGROUND_OPACITY, \
         TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
-        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, CENTER_LOGO_OPACITY, CENTER_LOGO_RATIO
+        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
     DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND)
-    CENTER_LOGO_OPACITY = get_config_value('基础设置', '居中Logo透明度', CENTER_LOGO_OPACITY, 'int')
-    CENTER_LOGO_RATIO = get_config_value('基础设置', '居中Logo大小', CENTER_LOGO_RATIO, 'float')
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
     JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING, 'int')
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
@@ -1636,8 +1550,6 @@ def open_settings_window(parent=None) -> bool:
     v_font = tk.IntVar(value=int(TRANSPARENT_FONT_RATIO * 1000))          # 千分比
     v_border_color = tk.StringVar(value=color_to_name(BORDER_FRAME_COLOR))
     v_border_text = tk.StringVar(value=color_to_name(BORDER_TEXT_COLOR))
-    v_center_alpha = tk.IntVar(value=CENTER_LOGO_OPACITY)
-    v_center_ratio = tk.IntVar(value=int(CENTER_LOGO_RATIO * 1000))   # 千分比
     v_auto = tk.BooleanVar(value=bool(AUTO_OPEN_OUTPUT))
     v_console = tk.BooleanVar(value=bool(SHOW_CONSOLE_WINDOW))
 
@@ -1670,8 +1582,6 @@ def open_settings_window(parent=None) -> bool:
         update_ini_value('基础设置', '边框背景图透明度', str(v_bg_alpha.get()))
         update_ini_value('基础设置', 'JPEG质量', str(v_quality.get()))
         update_ini_value('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0)))
-        update_ini_value('基础设置', '居中Logo透明度', str(v_center_alpha.get()))
-        update_ini_value('基础设置', '居中Logo大小', fmt_float(v_center_ratio.get() / 1000))
         update_ini_value('基础设置', '自动打开输出', '是' if v_auto.get() else '否')
         update_ini_value('基础设置', '显示控制台窗口', '是' if v_console.get() else '否')
         update_ini_value('白条边框', '边框高度', fmt_float(v_strip_h.get() / 1000))
@@ -1694,7 +1604,7 @@ def open_settings_window(parent=None) -> bool:
     ttk.Label(f1, text="自定义文字/签名:").grid(row=0, column=0, sticky='w', pady=2)
     ttk.Entry(f1, textvariable=v_text, width=22).grid(row=0, column=1, columnspan=2, sticky='ew', pady=2)
     ttk.Label(f1, text="默认样式:").grid(row=1, column=0, sticky='w', pady=2)
-    ttk.Combobox(f1, textvariable=v_style, values=['strip', 'transparent', 'border', 'blur', 'center'],
+    ttk.Combobox(f1, textvariable=v_style, values=['strip', 'transparent', 'border', 'blur'],
                  state='readonly', width=20).grid(row=1, column=1, columnspan=2, sticky='ew', pady=2)
     ttk.Label(f1, text="品牌(Logo):").grid(row=2, column=0, sticky='w', pady=2)
     ttk.Combobox(f1, textvariable=v_brand,
@@ -1715,14 +1625,12 @@ def open_settings_window(parent=None) -> bool:
     add_scale(f2, 1, "透明度:", v_alpha, 0, 255, "%d", 1)
     add_scale(f2, 2, "字体大小:", v_font, 10, 60, "%.3f", 1000)
 
-    # 白条边框 / 居中Logo
-    f3 = ttk.LabelFrame(outer, text="白条边框 / 居中Logo", padding=8)
+    # 白条边框
+    f3 = ttk.LabelFrame(outer, text="白条边框（strip）", padding=8)
     f3.grid(row=1, column=0, sticky='nsew', padx=(0, 5), pady=3)
     add_scale(f3, 0, "边框高度:", v_strip_h, 40, 150, "%.3f", 1000)
     ttk.Label(f3, text="（0.05=窄 0.10=宽）", foreground='#808080').grid(
         row=1, column=0, columnspan=3, sticky='w', pady=(0, 2))
-    add_scale(f3, 2, "居中Logo透明度:", v_center_alpha, 0, 255, "%d", 1)
-    add_scale(f3, 3, "居中Logo大小:", v_center_ratio, 50, 300, "%.2f", 1000)
 
     # 颜色 / 输出
     f4 = ttk.LabelFrame(outer, text="颜色与输出", padding=8)
@@ -1808,7 +1716,6 @@ def select_paths_gui() -> tuple:
         ('transparent', '半透明', '文字直接叠加在照片上'),
         ('border', '纯色边框', '边框包裹照片，底部显示参数'),
         ('blur', '模糊边框', '边缘模糊背景，效果自然'),
-        ('center', '居中Logo', 'Logo居中显示，半透明'),
     ]
     default_styles = [s.strip() for s in DEFAULT_STYLE.split(',') if s.strip()] or ['strip']
     style_vars = {}
@@ -2047,7 +1954,7 @@ def main():
     parser.add_argument(
         '-s', '--style',
         default=DEFAULT_STYLE,
-        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框), center(居中Logo)，多样式用逗号分隔如 strip,blur',
+        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)，多样式用逗号分隔如 strip,blur',
     )
     parser.add_argument(
         '-t', '--text',
@@ -2132,7 +2039,7 @@ def main():
             print(f"已选择 {len(multi_files)} 张照片")
 
     # 验证样式参数
-    valid_styles = {'strip', 'transparent', 'border', 'blur', 'center'}
+    valid_styles = {'strip', 'transparent', 'border', 'blur'}
     for s in args.style.split(','):
         if s.strip() not in valid_styles:
             print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")
@@ -2193,8 +2100,6 @@ def main():
             result = apply_color_border(image, exif_data, args.text, **kwargs)
         elif style == 'blur':
             result = apply_blur_border(image, exif_data, args.text, **kwargs)
-        elif style == 'center':
-            result = apply_center_logo(image, exif_data, args.text, logo_path=args.logo)
 
         # 显示预览
         result.show()
