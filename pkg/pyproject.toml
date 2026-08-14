@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "photo-watermark"
-version = "1.4.1"
+version = "1.5.0"
 description = "相机照片水印边框生成器 - 自动读取EXIF信息，生成专业水印边框"
 readme = "README.md"
 license = {text = "MIT"}

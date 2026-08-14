@@ -257,6 +257,7 @@ def apply_color_border(border_color=None):
 | **通用** | `DEFAULT_STYLE` | 默认水印样式 |
 | | `DEFAULT_INPUT` | 默认输入路径（空=弹窗） |
 | | `DEFAULT_OUTPUT` | 默认输出路径（空=自动） |
+| | `SHOW_CONSOLE_WINDOW` | 是否显示控制台窗口（exe模式，False=隐藏） |
 | | `JPEG_QUALITY` | JPEG 质量 |
 | | `FONT_SIZE_RATIO` | 字体大小比例 |
 | **strip** | `BORDER_HEIGHT_RATIO` | 边框高度 |

@@ -16,6 +16,7 @@
 import argparse
 import sys
 import os
+import re
 import configparser
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,15 @@ try:
 except ImportError:
     print("错误: 请安装 exifread 库 - pip install exifread")
     sys.exit(1)
+
+
+# 控制台输出容错：避免中文环境下重定向输出时因编码崩溃（如 © 等字符）
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(errors='replace')
+        sys.stderr.reconfigure(errors='replace')
+    except Exception:
+        pass
 
 
 def get_base_dir() -> Path:
@@ -115,7 +125,14 @@ DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE i
 DEFAULT_INPUT = get_config_value('基础设置', '默认输入路径', DEFAULT_INPUT if 'DEFAULT_INPUT' in dir() else '')
 DEFAULT_OUTPUT = get_config_value('基础设置', '默认输出路径', DEFAULT_OUTPUT if 'DEFAULT_OUTPUT' in dir() else '')
 JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY if 'JPEG_QUALITY' in dir() else 98, 'int')
+JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING if 'JPEG_SUBSAMPLING' in dir() else 0, 'int')
 AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT if 'AUTO_OPEN_OUTPUT' in dir() else True, 'bool')
+SHOW_CONSOLE_WINDOW = get_config_value('基础设置', '显示控制台窗口', SHOW_CONSOLE_WINDOW if 'SHOW_CONSOLE_WINDOW' in dir() else False, 'bool')
+BORDER_BACKGROUND_IMAGE = get_config_value('基础设置', '边框背景图', BORDER_BACKGROUND_IMAGE if 'BORDER_BACKGROUND_IMAGE' in dir() else '')
+BORDER_BACKGROUND_OPACITY = get_config_value('基础设置', '边框背景图透明度', BORDER_BACKGROUND_OPACITY if 'BORDER_BACKGROUND_OPACITY' in dir() else 128, 'int')
+CENTER_LOGO_OPACITY = get_config_value('基础设置', '居中Logo透明度', CENTER_LOGO_OPACITY if 'CENTER_LOGO_OPACITY' in dir() else 100, 'int')
+CENTER_LOGO_RATIO = get_config_value('基础设置', '居中Logo大小', CENTER_LOGO_RATIO if 'CENTER_LOGO_RATIO' in dir() else 0.12, 'float')
+DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND if 'DEFAULT_BRAND' in dir() else '')
 DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT if 'DEFAULT_TEXT' in dir() else '')
 
 # 文字模板
@@ -211,6 +228,31 @@ if 'OVERWRITE_EXISTING' not in dir():
     OVERWRITE_EXISTING = False
 if 'AUTO_OPEN_OUTPUT' not in dir():
     AUTO_OPEN_OUTPUT = True
+if 'SHOW_CONSOLE_WINDOW' not in dir():
+    SHOW_CONSOLE_WINDOW = False
+if 'BORDER_BACKGROUND_IMAGE' not in dir():
+    BORDER_BACKGROUND_IMAGE = ''
+if 'BORDER_BACKGROUND_OPACITY' not in dir():
+    BORDER_BACKGROUND_OPACITY = 128
+if 'CENTER_LOGO_OPACITY' not in dir():
+    CENTER_LOGO_OPACITY = 100
+if 'CENTER_LOGO_RATIO' not in dir():
+    CENTER_LOGO_RATIO = 0.12
+if 'DEFAULT_BRAND' not in dir():
+    DEFAULT_BRAND = ''
+
+# ========== 控制台窗口显示控制（仅exe模式生效） ==========
+# 源码运行时始终显示控制台，方便调试；exe模式按配置隐藏
+CONSOLE_HIDDEN = False
+if getattr(sys, 'frozen', False) and not SHOW_CONSOLE_WINDOW:
+    CONSOLE_HIDDEN = True
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 = SW_HIDE
+    except Exception:
+        pass
 
 # 支持的图片格式
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp'}
@@ -356,6 +398,9 @@ def read_exif(image_path: str) -> Dict[str, str]:
         print(f"  镜头: {exif_data.get('lens', '未识别')}")
         print(f"  参数: {exif_data.get('aperture', '-')} {exif_data.get('shutter', '-')} {exif_data.get('iso', '-')} {exif_data.get('focal_length', '-')}")
 
+        # 文件夹名（用于模板 {文件夹}）
+        exif_data['folder'] = Path(image_path).parent.name
+
     except Exception as e:
         print(f"[警告] 未找到EXIF信息: {e}")
         print(f"   提示：手机照片可能需要先关闭'优化存储'功能")
@@ -388,6 +433,7 @@ def format_template(template: str, exif_data: Dict[str, str]) -> str:
         '{ISO}': exif_data.get('iso', ''),
         '{日期}': date_str,
         '{品牌}': exif_data.get('brand', ''),
+        '{文件夹}': exif_data.get('folder', ''),   # 照片所在文件夹名
     }
 
     result = template
@@ -396,6 +442,10 @@ def format_template(template: str, exif_data: Dict[str, str]) -> str:
 
     # 清理多余空格
     result = ' '.join(result.split())
+
+    # 如果只剩分隔符号（如 "|"），说明没有可显示的内容，返回空
+    if not any(ch.isalnum() for ch in result):
+        return ''
 
     return result
 
@@ -472,6 +522,17 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
         'PENTAX': 'pentax_logo.png',
         'RICOH': 'pentax_logo.png',        # 宾得已被理光收购
         'PANASONIC': 'panasonic_logo.png',
+        # 手机/无人机品牌（可自行放入对应 logo 文件）
+        'XIAOMI': 'xiaomi_logo.png',
+        'HUAWEI': 'huawei_logo.png',
+        'HONOR': 'honor_logo.png',
+        'APPLE': 'apple_logo.png',
+        'IPHONE': 'apple_logo.png',
+        'DJI': 'dji_logo.png',
+        'SAMSUNG': 'samsung_logo.png',
+        'GOOGLE': 'google_logo.png',
+        'VIVO': 'vivo_logo.png',
+        'OPPO': 'oppo_logo.png',
     }
 
     # 清理品牌名称
@@ -522,6 +583,42 @@ def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
     elif orientation == 8:
         image = image.rotate(90, expand=True)
     return image
+
+
+def create_frame_canvas(size: Tuple[int, int], base_color: Tuple[int, int, int]) -> Image.Image:
+    """
+    创建水印边框画布：
+    - 未设置背景图：纯色画布
+    - 设置了背景图：图片铺满画布（居中裁剪），并按配置的透明度与底色混合（半透明）
+
+    Args:
+        size: 画布尺寸 (宽, 高)
+        base_color: 底色 (R, G, B)
+
+    Returns:
+        画布图片
+    """
+    canvas = Image.new('RGB', size, base_color)
+    bg_path = BORDER_BACKGROUND_IMAGE
+    if bg_path and Path(bg_path).exists():
+        try:
+            bg = Image.open(bg_path).convert('RGB')
+            target_w, target_h = size
+            # cover 缩放：等比放大铺满，超出部分居中裁剪
+            scale = max(target_w / bg.width, target_h / bg.height)
+            new_w = max(target_w, int(bg.width * scale))
+            new_h = max(target_h, int(bg.height * scale))
+            bg = bg.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            bg = bg.crop((left, top, left + target_w, top + target_h))
+            # 按透明度与底色混合
+            alpha = max(0, min(255, BORDER_BACKGROUND_OPACITY)) / 255.0
+            canvas = Image.blend(canvas, bg, alpha)
+            print(f"  边框背景图: {Path(bg_path).name} (透明度: {int(alpha * 255)})")
+        except Exception as e:
+            print(f"  [警告] 背景图加载失败: {e}，使用纯色背景")
+    return canvas
 
 
 def get_params_text(exif_data: Dict[str, str]) -> str:
@@ -611,9 +708,9 @@ def apply_white_border(
     margin_top = height + vertical_offset
     right_x = width - right_margin
 
-    # 创建新图片（原图 + 底部边框）
+    # 创建新图片（原图 + 底部边框），底色支持自定义半透明背景图
     new_height = height + border_height
-    new_image = Image.new('RGB', (width, new_height), COLOR_BORDER)
+    new_image = create_frame_canvas((width, new_height), COLOR_BORDER)
 
     # 粘贴原图
     new_image.paste(image, (0, 0))
@@ -846,8 +943,8 @@ def apply_color_border(
     new_width = width + 2 * border_size
     new_height = height + border_size + bottom_border
 
-    # 创建新图片
-    new_image = Image.new('RGB', (new_width, new_height), border_color)
+    # 创建新图片（底色支持自定义半透明背景图）
+    new_image = create_frame_canvas((new_width, new_height), border_color)
 
     # 粘贴原图
     new_image.paste(image, (border_size, border_size))
@@ -1003,6 +1100,79 @@ def apply_blur_border(
     return new_image
 
 
+def apply_center_logo(
+    image: Image.Image,
+    exif_data: Dict[str, str],
+    custom_text: str = '',
+    logo_path: str = '',
+) -> Image.Image:
+    """
+    应用居中Logo水印样式
+
+    布局：
+    - 品牌 Logo 居中显示，高度约为图片高度的 CENTER_LOGO_RATIO（默认12%），半透明
+    - 自定义文字显示在 Logo 下方（白色带阴影）
+
+    Args:
+        image: 原始图片
+        exif_data: EXIF数据
+        custom_text: 自定义文字（可选）
+        logo_path: logo图片路径（可选）
+
+    Returns:
+        添加水印后的图片
+    """
+    result = image.convert('RGBA') if image.mode != 'RGBA' else image.copy()
+    width, height = image.size
+    draw = ImageDraw.Draw(result, 'RGBA')
+
+    # Logo 大小：高度约为图片高度的 CENTER_LOGO_RATIO，保持比例（不能太大）
+    logo = None
+    if logo_path and Path(logo_path).exists():
+        try:
+            logo = Image.open(logo_path).convert('RGBA')
+            logo_height = max(24, int(height * CENTER_LOGO_RATIO))
+            ratio = logo_height / logo.height
+            logo = logo.resize((max(24, int(logo.width * ratio)), logo_height), Image.Resampling.LANCZOS)
+        except Exception as e:
+            print(f"  [警告] Logo加载失败: {e}")
+            logo = None
+
+    # 自定义文字（Logo 下方），字号与 logo 大小匹配
+    text = custom_text or ''
+    font = get_font(max(16, int(height * 0.02))) if text else None
+    text_height = 0
+    if text and font:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_height = bbox[3] - bbox[1]
+
+    # 整体垂直居中
+    block_height = (logo.height if logo else 0) + (text_height + 12 if text else 0)
+    start_y = max(0, (height - block_height) // 2)
+
+    # 半透明 Logo
+    if logo:
+        alpha = max(0, min(255, CENTER_LOGO_OPACITY)) / 255.0
+        r, g, b, a = logo.split()
+        a = a.point(lambda p: int(p * alpha))
+        logo.putalpha(a)
+        x = (width - logo.width) // 2
+        result.paste(logo, (x, start_y), logo)
+        print(f"  居中Logo: {Path(logo_path).name} (尺寸: {logo.width}x{logo.height}, 透明度: {int(alpha * 255)})")
+
+    # 文字（白色 + 阴影）
+    if text and font:
+        y = start_y + (logo.height if logo else 0) + 12
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (width - text_width) // 2
+        shadow_offset = max(1, font.size // 15)
+        draw.text((x + shadow_offset, y + shadow_offset), text, fill=(0, 0, 0, 160), font=font)
+        draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
+
+    return result.convert('RGB')
+
+
 def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs):
     """
     应用单个水印样式
@@ -1024,8 +1194,17 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             logo_path=logo_path,
         )
     elif style == 'transparent':
-        # 使用模板格式化文字
-        text = custom_text or format_template(TEMPLATE_TRANSPARENT, exif_data)
+        # 模板参数 + 自定义签名（签名追加在参数后面，不替换参数）
+        text = format_template(TEMPLATE_TRANSPARENT, exif_data)
+        if custom_text:
+            text = f"{text} {custom_text}" if text else custom_text
+        if not text:
+            # 兜底：签名 → 相机 → 拍摄日期（日期始终存在）
+            text = DEFAULT_TEXT or exif_data.get('camera') or ''
+            if not text and exif_data.get('datetime'):
+                text = exif_data['datetime'].replace(':', '-', 2)[:10]
+            if not text:
+                print("  [警告] 没有可显示的水印文字")
         return apply_transparent_watermark(
             image, text,
             position=kwargs.get('position', ''),
@@ -1050,6 +1229,11 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             text_color=kwargs.get('text_color', None),
             text_shadow=kwargs.get('text_shadow', True),
         )
+    elif style == 'center':
+        return apply_center_logo(
+            image, exif_data, custom_text,
+            logo_path=logo_path,
+        )
     else:
         print(f"  [警告] 未知样式: {style}")
         return image
@@ -1073,7 +1257,7 @@ def process_single_image(
         **kwargs: 其他参数
 
     Returns:
-        是否成功
+        'ok' - 处理成功；'skipped' - 输出文件已存在被跳过；'failed' - 处理失败
     """
     try:
         # 读取图片
@@ -1082,7 +1266,7 @@ def process_single_image(
         # 检查图片尺寸是否过小
         if image.width < 200 or image.height < 200:
             print(f"  [警告] 图片尺寸过小，跳过: {image.width}x{image.height}")
-            return False
+            return 'failed'
 
         # 确保是RGB模式
         if image.mode in ('RGBA', 'P'):
@@ -1107,12 +1291,15 @@ def process_single_image(
             else:
                 print("  未找到匹配的品牌Logo")
         elif not logo_path:
-            # logo_path 为空，根据品牌自动匹配
-            brand = exif_data.get('brand', '')
+            # logo_path 为空，优先用手动指定品牌，否则用EXIF品牌自动匹配
+            brand = DEFAULT_BRAND or exif_data.get('brand', '')
             if brand:
                 logo_path = get_logo_by_brand(brand)
                 if logo_path:
-                    print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
+                    if DEFAULT_BRAND:
+                        print(f"  手动指定Logo: {Path(logo_path).name} (品牌: {brand})")
+                    else:
+                        print(f"  自动选择Logo: {Path(logo_path).name} (品牌: {brand})")
                 else:
                     print(f"  未找到品牌Logo: {brand}")
 
@@ -1127,6 +1314,7 @@ def process_single_image(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_ext = Path(output_path).suffix
 
+        processed_count = 0
         for i, single_style in enumerate(styles):
             # 为每个样式生成独立的文件名
             if len(styles) > 1:
@@ -1146,12 +1334,16 @@ def process_single_image(
                 print(f"    [跳过] 文件已存在: {Path(style_output_path).name}")
                 continue
 
+            processed_count += 1
+
             # 应用样式（每次都从原图开始，不叠加）
             result = apply_single_style(image, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
 
             # 保存图片
             if output_ext.lower() in ('.jpg', '.jpeg'):
-                result.save(str(style_output_path), 'JPEG', quality=kwargs.get('quality', JPEG_QUALITY))
+                result.save(str(style_output_path), 'JPEG',
+                            quality=kwargs.get('quality', JPEG_QUALITY),
+                            subsampling=kwargs.get('subsampling', JPEG_SUBSAMPLING))
             elif output_ext.lower() == '.png':
                 result.save(str(style_output_path), 'PNG')
             else:
@@ -1160,14 +1352,16 @@ def process_single_image(
             if len(styles) > 1:
                 print(f"    -> 保存到: {style_output_path.name}")
 
-        return True
+        if processed_count == 0:
+            return 'skipped'
+        return 'ok'
 
     except Image.DecompressionBombError:
         print(f"  [失败] 图片过大，内存不足: {input_path}")
-        return False
+        return 'failed'
     except Exception as e:
         print(f"  [失败] 处理失败: {e}")
-        return False
+        return 'failed'
 
 
 def batch_process(
@@ -1188,7 +1382,7 @@ def batch_process(
         **kwargs: 其他参数
 
     Returns:
-        (成功数量, 总数量, 用时秒数)
+        (成功数量, 跳过数量, 总数量, 用时秒数)
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -1208,7 +1402,7 @@ def batch_process(
     if not image_files:
         print(f"[警告] 在 {input_dir} 中没有找到支持的图片文件")
         print(f"   支持格式: {', '.join(SUPPORTED_FORMATS)}")
-        return 0, 0, 0
+        return 0, 0, 0, 0
 
     print(f"找到 {len(image_files)} 张图片")
 
@@ -1220,6 +1414,7 @@ def batch_process(
         use_progress_bar = False
 
     success_count = 0
+    skipped_count = 0
     start_time = datetime.now()
 
     # 解析样式列表（移到循环外，避免重复解析）
@@ -1243,10 +1438,13 @@ def batch_process(
         if not use_progress_bar:
             print(f"[{i}/{len(image_files)}] 处理: {img_file.name}")
 
-        if process_single_image(
+        status = process_single_image(
             str(img_file), str(output_file), style, custom_text, **kwargs
-        ):
+        )
+        if status == 'ok':
             success_count += 1
+        elif status == 'skipped':
+            skipped_count += 1
         else:
             if not use_progress_bar:
                 print(f"  -> 处理失败")
@@ -1254,7 +1452,7 @@ def batch_process(
     # 计算用时
     elapsed_time = (datetime.now() - start_time).total_seconds()
 
-    return success_count, len(image_files), elapsed_time
+    return success_count, skipped_count, len(image_files), elapsed_time
 
 
 def get_smart_style(image_path: str) -> str:
@@ -1282,11 +1480,505 @@ def get_smart_style(image_path: str) -> str:
         return DEFAULT_STYLE
 
 
+def color_to_name(color: Tuple[int, int, int]) -> str:
+    """颜色元组转名称（用于设置窗口显示）"""
+    names = {
+        '黑色': (0, 0, 0), '白色': (255, 255, 255), '灰色': (128, 128, 128),
+        '红色': (255, 0, 0), '绿色': (0, 128, 0), '蓝色': (0, 0, 255),
+    }
+    color = tuple(color)
+    for name, c in names.items():
+        if color == c:
+            return name
+    return ','.join(map(str, color))
+
+
+def update_ini_value(section: str, key: str, value_str: str) -> bool:
+    """
+    更新 水印设置.ini 中的某个键值（逐行替换，保留文件中的注释）
+
+    Args:
+        section: 配置段（如 基础设置）
+        key: 键名（如 自定义文字）
+        value_str: 新值（字符串形式）
+
+    Returns:
+        是否更新成功
+    """
+    ini_path = get_base_dir() / '水印设置.ini'
+    if not ini_path.exists():
+        return False
+    try:
+        lines = ini_path.read_text(encoding='utf-8').splitlines()
+    except Exception:
+        return False
+
+    key_re = re.compile(rf'^\s*{re.escape(key)}\s*=')
+    current_section = ''
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            current_section = stripped[1:-1].strip()
+            continue
+        if current_section == section and key_re.match(line):
+            # 保留行尾注释
+            comment = ''
+            m = re.search(r'(\s+#.*)$', line)
+            if m:
+                comment = m.group(1)
+            lines[i] = f'{key} = {value_str}{comment}'
+            try:
+                ini_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            except Exception:
+                return False
+            return True
+    return False
+
+
+def refresh_globals_from_ini():
+    """设置窗口保存后，重新读取 ini 并更新程序内配置（立即生效）"""
+    global _ini_config, DEFAULT_STYLE, DEFAULT_TEXT, JPEG_QUALITY, JPEG_SUBSAMPLING, AUTO_OPEN_OUTPUT, \
+        SHOW_CONSOLE_WINDOW, BORDER_BACKGROUND_IMAGE, BORDER_BACKGROUND_OPACITY, \
+        TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
+        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, CENTER_LOGO_OPACITY, CENTER_LOGO_RATIO
+    _ini_config = load_ini_config()
+    DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
+    DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
+    DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND)
+    CENTER_LOGO_OPACITY = get_config_value('基础设置', '居中Logo透明度', CENTER_LOGO_OPACITY, 'int')
+    CENTER_LOGO_RATIO = get_config_value('基础设置', '居中Logo大小', CENTER_LOGO_RATIO, 'float')
+    JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
+    JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING, 'int')
+    JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
+    AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT, 'bool')
+    SHOW_CONSOLE_WINDOW = get_config_value('基础设置', '显示控制台窗口', SHOW_CONSOLE_WINDOW, 'bool')
+    BORDER_BACKGROUND_IMAGE = get_config_value('基础设置', '边框背景图', BORDER_BACKGROUND_IMAGE)
+    BORDER_BACKGROUND_OPACITY = get_config_value('基础设置', '边框背景图透明度', BORDER_BACKGROUND_OPACITY, 'int')
+    TRANSPARENT_POSITION = parse_position(get_config_value('半透明水印', '位置', TRANSPARENT_POSITION))
+    TRANSPARENT_OPACITY = get_config_value('半透明水印', '透明度', TRANSPARENT_OPACITY, 'int')
+    TRANSPARENT_FONT_RATIO = get_config_value('半透明水印', '字体大小', TRANSPARENT_FONT_RATIO, 'float')
+    BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
+    BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
+
+
+def open_settings_window(parent=None) -> bool:
+    """
+    打开设置窗口，所有设置保存到 水印设置.ini 并立即生效
+
+    Args:
+        parent: 父窗口（设置窗口作为其子窗口）
+
+    Returns:
+        True=已保存，False=取消
+    """
+    import tkinter as tk
+    from tkinter import ttk, filedialog, font as tkfont
+
+    win = tk.Toplevel(parent) if parent else tk.Tk()
+    win.title("Photo Watermark - 设置")
+    win.resizable(False, False)
+    if parent:
+        win.transient(parent)
+        win.grab_set()
+
+    # 中文字体
+    try:
+        families = set(tkfont.families(win))
+        for name in ("Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "微软雅黑"):
+            if name in families:
+                tkfont.nametofont("TkDefaultFont").configure(family=name, size=9)
+                break
+    except Exception:
+        pass
+
+    saved = {'flag': False}
+
+    # ===== 配置变量 =====
+    # 品牌列表（显示名, 配置值）；空值=自动识别
+    BRAND_OPTIONS = [
+        ('自动', ''), ('尼康', 'NIKON'), ('佳能', 'CANON'), ('索尼', 'SONY'),
+        ('富士', 'FUJI'), ('哈苏', 'HASSELBLAD'), ('奥林巴斯', 'OLYMPUS'),
+        ('宾得', 'PENTAX'), ('松下', 'PANASONIC'), ('小米', 'XIAOMI'),
+        ('华为', 'HUAWEI'), ('荣耀', 'HONOR'), ('苹果', 'APPLE'),
+        ('大疆', 'DJI'), ('三星', 'SAMSUNG'), ('谷歌', 'GOOGLE'),
+        ('vivo', 'VIVO'), ('OPPO', 'OPPO'),
+    ]
+    _brand_code = {n: c for n, c in BRAND_OPTIONS}
+    _brand_name = {c: n for n, c in BRAND_OPTIONS}
+    v_brand = tk.StringVar(value=_brand_name.get(DEFAULT_BRAND.upper(), '自动'))
+    v_text = tk.StringVar(value=DEFAULT_TEXT)
+    v_style = tk.StringVar(value=DEFAULT_STYLE.split(',')[0])
+    _sub_map = {0: '4:4:4(最清晰)', 1: '4:2:2', 2: '4:2:0(文件小)'}
+    _sub_rev = {v: k for k, v in _sub_map.items()}
+    v_sub_display = tk.StringVar(value=_sub_map.get(JPEG_SUBSAMPLING, _sub_map[0]))
+    v_bg = tk.StringVar(value=BORDER_BACKGROUND_IMAGE)
+    v_bg_alpha = tk.IntVar(value=BORDER_BACKGROUND_OPACITY)
+    v_quality = tk.IntVar(value=JPEG_QUALITY)
+    v_strip_h = tk.IntVar(value=int(BORDER_HEIGHT_RATIO * 1000))          # 千分比
+    v_pos = tk.StringVar(value={'top-left': '左上', 'top-right': '右上',
+                                'bottom-left': '左下', 'bottom-right': '右下'}
+                         .get(TRANSPARENT_POSITION, '右下'))
+    v_alpha = tk.IntVar(value=TRANSPARENT_OPACITY)
+    v_font = tk.IntVar(value=int(TRANSPARENT_FONT_RATIO * 1000))          # 千分比
+    v_border_color = tk.StringVar(value=color_to_name(BORDER_FRAME_COLOR))
+    v_border_text = tk.StringVar(value=color_to_name(BORDER_TEXT_COLOR))
+    v_center_alpha = tk.IntVar(value=CENTER_LOGO_OPACITY)
+    v_center_ratio = tk.IntVar(value=int(CENTER_LOGO_RATIO * 1000))   # 千分比
+    v_auto = tk.BooleanVar(value=bool(AUTO_OPEN_OUTPUT))
+    v_console = tk.BooleanVar(value=bool(SHOW_CONSOLE_WINDOW))
+
+    def add_scale(parent, row, label, var, frm, to, fmt, divisor=1):
+        """一行：文字 + 滑杆 + 实时数值"""
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky='w', pady=2)
+        val_lb = ttk.Label(parent, text=fmt % (var.get() / divisor), width=6, anchor='e')
+        val_lb.grid(row=row, column=2, sticky='e', padx=(4, 0))
+
+        def _upd(v, vv=var, ll=val_lb, ff=fmt, d=divisor):
+            ll.config(text=ff % (float(v) / d))
+
+        ttk.Scale(parent, from_=frm, to=to, variable=var, length=170, command=_upd).grid(
+            row=row, column=1, sticky='ew', pady=2)
+
+    def browse_bg():
+        path = filedialog.askopenfilename(
+            title="选择边框背景图",
+            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp *.tiff"), ("所有文件", "*.*")],
+            parent=win,
+        )
+        if path:
+            v_bg.set(path)
+
+    def on_save():
+        update_ini_value('基础设置', '自定义文字', v_text.get())
+        update_ini_value('基础设置', '默认样式', v_style.get())
+        update_ini_value('基础设置', '默认品牌', _brand_code.get(v_brand.get(), ''))
+        update_ini_value('基础设置', '边框背景图', v_bg.get())
+        update_ini_value('基础设置', '边框背景图透明度', str(v_bg_alpha.get()))
+        update_ini_value('基础设置', 'JPEG质量', str(v_quality.get()))
+        update_ini_value('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0)))
+        update_ini_value('基础设置', '居中Logo透明度', str(v_center_alpha.get()))
+        update_ini_value('基础设置', '居中Logo大小', f"{v_center_ratio.get() / 1000:.3f}")
+        update_ini_value('基础设置', '自动打开输出', '是' if v_auto.get() else '否')
+        update_ini_value('基础设置', '显示控制台窗口', '是' if v_console.get() else '否')
+        update_ini_value('白条边框', '边框高度', f"{v_strip_h.get() / 1000:.3f}")
+        update_ini_value('半透明水印', '位置', v_pos.get())
+        update_ini_value('半透明水印', '透明度', str(v_alpha.get()))
+        update_ini_value('半透明水印', '字体大小', f"{v_font.get() / 1000:.3f}")
+        update_ini_value('颜色设置', '边框颜色', v_border_color.get())
+        update_ini_value('颜色设置', '边框文字颜色', v_border_text.get())
+        refresh_globals_from_ini()
+        saved['flag'] = True
+        win.destroy()
+
+    # ===== 布局 =====
+    outer = ttk.Frame(win, padding=10)
+    outer.pack(fill='both', expand=True)
+
+    # 基础设置
+    f1 = ttk.LabelFrame(outer, text="基础设置", padding=8)
+    f1.grid(row=0, column=0, sticky='nsew', padx=(0, 5), pady=3)
+    ttk.Label(f1, text="自定义文字/签名:").grid(row=0, column=0, sticky='w', pady=2)
+    ttk.Entry(f1, textvariable=v_text, width=22).grid(row=0, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Label(f1, text="默认样式:").grid(row=1, column=0, sticky='w', pady=2)
+    ttk.Combobox(f1, textvariable=v_style, values=['strip', 'transparent', 'border', 'blur', 'center'],
+                 state='readonly', width=20).grid(row=1, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Label(f1, text="品牌(Logo):").grid(row=2, column=0, sticky='w', pady=2)
+    ttk.Combobox(f1, textvariable=v_brand,
+                 values=[n for n, _ in BRAND_OPTIONS], state='readonly', width=20).grid(
+        row=2, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Label(f1, text="边框背景图:").grid(row=3, column=0, sticky='w', pady=2)
+    ttk.Entry(f1, textvariable=v_bg, width=22).grid(row=3, column=1, sticky='ew', pady=2)
+    ttk.Button(f1, text="浏览...", command=browse_bg).grid(row=3, column=2, padx=(4, 0), pady=2)
+    add_scale(f1, 4, "背景图透明度:", v_bg_alpha, 0, 255, "%d", 1)
+    add_scale(f1, 5, "JPEG质量:", v_quality, 50, 100, "%d", 1)
+
+    # 半透明水印
+    f2 = ttk.LabelFrame(outer, text="半透明水印", padding=8)
+    f2.grid(row=0, column=1, sticky='nsew', padx=(5, 0), pady=3)
+    ttk.Label(f2, text="位置:").grid(row=0, column=0, sticky='w', pady=2)
+    ttk.Combobox(f2, textvariable=v_pos, values=['左上', '右上', '左下', '右下'],
+                 state='readonly', width=18).grid(row=0, column=1, columnspan=2, sticky='ew', pady=2)
+    add_scale(f2, 1, "透明度:", v_alpha, 0, 255, "%d", 1)
+    add_scale(f2, 2, "字体大小:", v_font, 10, 60, "%.3f", 1000)
+
+    # 白条边框 / 居中Logo
+    f3 = ttk.LabelFrame(outer, text="白条边框 / 居中Logo", padding=8)
+    f3.grid(row=1, column=0, sticky='nsew', padx=(0, 5), pady=3)
+    add_scale(f3, 0, "边框高度:", v_strip_h, 40, 150, "%.3f", 1000)
+    ttk.Label(f3, text="（0.05=窄 0.10=宽）", foreground='#808080').grid(
+        row=1, column=0, columnspan=3, sticky='w', pady=(0, 2))
+    add_scale(f3, 2, "居中Logo透明度:", v_center_alpha, 0, 255, "%d", 1)
+    add_scale(f3, 3, "居中Logo大小:", v_center_ratio, 50, 300, "%.2f", 1000)
+
+    # 颜色 / 输出
+    f4 = ttk.LabelFrame(outer, text="颜色与输出", padding=8)
+    f4.grid(row=1, column=1, sticky='nsew', padx=(5, 0), pady=3)
+    ttk.Label(f4, text="边框颜色:").grid(row=0, column=0, sticky='w', pady=2)
+    ttk.Combobox(f4, textvariable=v_border_color, values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
+                 state='readonly', width=14).grid(row=0, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Label(f4, text="边框文字颜色:").grid(row=1, column=0, sticky='w', pady=2)
+    ttk.Combobox(f4, textvariable=v_border_text, values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
+                 state='readonly', width=14).grid(row=1, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Label(f4, text="JPEG采样:").grid(row=2, column=0, sticky='w', pady=2)
+    ttk.Combobox(f4, textvariable=v_sub_display,
+                 values=[_sub_map[0], _sub_map[1], _sub_map[2]],
+                 state='readonly', width=14).grid(row=2, column=1, columnspan=2, sticky='ew', pady=2)
+    ttk.Checkbutton(f4, text="处理完自动打开输出文件夹", variable=v_auto).grid(
+        row=3, column=0, columnspan=3, sticky='w', pady=2)
+    ttk.Checkbutton(f4, text="显示控制台窗口（exe）", variable=v_console).grid(
+        row=4, column=0, columnspan=3, sticky='w', pady=2)
+
+    # 按钮
+    btns = ttk.Frame(outer)
+    btns.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+    ttk.Button(btns, text="保存", command=on_save, width=14).pack(side='left', padx=6)
+    ttk.Button(btns, text="取消", command=win.destroy, width=14).pack(side='left', padx=6)
+
+    # 窗口居中
+    win.update_idletasks()
+    w = win.winfo_reqwidth()
+    h = win.winfo_reqheight()
+    x = (win.winfo_screenwidth() - w) // 2
+    y = (win.winfo_screenheight() - h) // 3
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+    # 模态等待：窗口销毁后返回（wait_window 处理事件直到本窗口关闭）
+    win.wait_window()
+    return saved['flag']
+
+
+def select_paths_gui() -> tuple:
+    """
+    弹出图形界面让用户选择水印样式、照片文件（可多选）或文件夹
+
+    窗口内容：
+    - 水印样式选择（可多选，默认勾选配置中的样式）
+    - 选择照片：资源管理器中可按住 Ctrl/Shift 多选
+    - 选择文件夹：批量处理该文件夹内所有照片
+
+    Returns:
+        (路径列表, 样式字符串)；用户取消时返回 ([], '')
+    """
+    import tkinter as tk
+    from tkinter import filedialog, font as tkfont
+
+    root = tk.Tk()
+    root.title("Photo Watermark - 选择照片")
+    root.attributes('-topmost', True)
+    root.resizable(False, False)
+
+    # 尝试使用中文字体（微软雅黑），失败则用系统默认
+    try:
+        families = set(tkfont.families(root))
+        for name in ("Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "微软雅黑"):
+            if name in families:
+                tkfont.nametofont("TkDefaultFont").configure(family=name, size=10)
+                break
+    except Exception:
+        pass
+
+    # 命名字体（标题粗体、说明小字）
+    base_font = tkfont.nametofont("TkDefaultFont")
+    bold_font = base_font.copy()
+    bold_font.configure(weight='bold')
+    big_font = base_font.copy()
+    big_font.configure(size=14, weight='bold')
+    small_font = base_font.copy()
+    small_font.configure(size=9)
+
+    result = {'paths': None, 'style': ''}
+
+    # 水印样式选项（可多选，默认勾选配置中的样式）
+    styles = [
+        ('strip', '白底条形', '照片下方参数条，尼康/佳能风格'),
+        ('transparent', '半透明', '文字直接叠加在照片上'),
+        ('border', '纯色边框', '边框包裹照片，底部显示参数'),
+        ('blur', '模糊边框', '边缘模糊背景，效果自然'),
+        ('center', '居中Logo', 'Logo居中显示，半透明'),
+    ]
+    default_styles = [s.strip() for s in DEFAULT_STYLE.split(',') if s.strip()] or ['strip']
+    style_vars = {}
+    for key, _, _ in styles:
+        style_vars[key] = tk.BooleanVar(value=(key in default_styles))
+
+    def get_style():
+        checked = [k for k, _, _ in styles if style_vars[k].get()]
+        return ','.join(checked) if checked else 'strip'
+
+    def pick_files():
+        filetypes = [
+            ("图片文件", "*.jpg *.jpeg *.png *.tiff *.bmp"),
+            ("所有文件", "*.*"),
+        ]
+        files = filedialog.askopenfilenames(
+            title="选择要处理的照片（可多选）",
+            filetypes=filetypes,
+            parent=root,
+        )
+        if files:
+            result['paths'] = list(files)
+            result['style'] = get_style()
+            root.destroy()
+
+    def pick_folder():
+        folder = filedialog.askdirectory(
+            title="选择要批量处理的文件夹",
+            parent=root,
+        )
+        if folder:
+            result['paths'] = [folder]
+            result['style'] = get_style()
+            root.destroy()
+
+    def open_settings():
+        """打开设置窗口，保存后刷新样式勾选"""
+        changed = open_settings_window(root)
+        if changed:
+            new_defaults = [s.strip() for s in DEFAULT_STYLE.split(',') if s.strip()] or ['strip']
+            for key, _, _ in styles:
+                style_vars[key].set(key in new_defaults)
+
+    # ========== 界面布局 ==========
+    from tkinter import ttk
+
+    try:
+        style = ttk.Style(root)
+        try:
+            style.theme_use('vista')  # Windows 现代主题（不存在则跳过）
+        except tk.TclError:
+            pass
+        style.configure('Header.TLabel', font=big_font, foreground='#2b579a')
+        style.configure('Sub.TLabel', font=small_font, foreground='#666666')
+        style.configure('Desc.TLabel', font=small_font, foreground='#808080')
+        style.configure('Primary.TButton', font=base_font, padding=(14, 8))
+        style.configure('Normal.TButton', font=base_font, padding=(12, 8))
+    except Exception:
+        style = None
+
+    # 标题区
+    header = tk.Frame(root, bg='#eef3fb')
+    header.pack(fill='x')
+    tk.Label(header, text="Photo Watermark  ·  照片水印", font=big_font,
+             bg='#eef3fb', fg='#2b579a').pack(pady=(14, 2))
+    tk.Label(header, text="给相机照片添加拍摄参数水印边框", font=small_font,
+             bg='#eef3fb', fg='#666666').pack(pady=(0, 12))
+
+    frame = tk.Frame(root, padx=24, pady=16)
+    frame.pack(fill='both', expand=True)
+
+    # 样式选择区
+    sf = ttk.LabelFrame(frame, text=" 水印样式（可多选） ", padding=10)
+    sf.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
+    for i, (key, label, desc) in enumerate(styles):
+        row = i // 2
+        col = i % 2
+        cell = ttk.Frame(sf)
+        cell.grid(row=row, column=col, sticky='w', padx=(0, 30), pady=3)
+        ttk.Checkbutton(cell, text=label, variable=style_vars[key]).pack(anchor='w')
+        ttk.Label(cell, text=desc, style='Desc.TLabel').pack(anchor='w', padx=(20, 0))
+
+    # 照片选择区
+    pf = ttk.LabelFrame(frame, text=" 选择要处理的照片 ", padding=10)
+    pf.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 10))
+    ttk.Button(pf, text="选择照片（可多选）", command=pick_files,
+               style='Primary.TButton').pack(side='left', padx=6)
+    ttk.Button(pf, text="选择文件夹（批量处理）", command=pick_folder,
+               style='Primary.TButton').pack(side='left', padx=6)
+
+    # 底部按钮
+    btm = ttk.Frame(frame)
+    btm.grid(row=2, column=0, columnspan=2, sticky='ew')
+    ttk.Button(btm, text="设置...", command=open_settings,
+               style='Normal.TButton').pack(side='left')
+    ttk.Button(btm, text="取消", command=root.destroy,
+               style='Normal.TButton').pack(side='right')
+
+    # 窗口居中显示，并保证足够大
+    root.update_idletasks()
+    w = max(root.winfo_reqwidth(), 520)
+    h = root.winfo_reqheight()
+    x = (root.winfo_screenwidth() - w) // 2
+    y = (root.winfo_screenheight() - h) // 3
+    root.geometry(f"{w}x{h}+{x}+{y}")
+
+    root.mainloop()
+    return result['paths'] or [], result['style']
+
+
+def notify(title: str, message: str, is_error: bool = False):
+    """
+    完成/错误提示：控制台隐藏时用弹窗，否则打印到控制台
+
+    Args:
+        title: 弹窗标题
+        message: 提示内容
+        is_error: 是否为错误提示
+    """
+    if CONSOLE_HIDDEN:
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            tip = tk.Tk()
+            tip.withdraw()
+            tip.attributes('-topmost', True)
+            if is_error:
+                messagebox.showerror(title, message, parent=tip)
+            else:
+                messagebox.showinfo(title, message, parent=tip)
+            tip.destroy()
+        except Exception:
+            pass
+    else:
+        print(message)
+
+
+def process_multiple_files(
+    file_list: list,
+    style: str = 'strip',
+    custom_text: str = '',
+    **kwargs,
+) -> Tuple[int, int, float]:
+    """
+    处理多张图片，输出到各自所在目录（与照片放一起，自动命名）
+
+    Args:
+        file_list: 图片文件路径列表
+        style: 边框样式
+        custom_text: 自定义文字
+        **kwargs: 其他参数
+
+    Returns:
+        (成功数量, 跳过数量, 总数量, 用时秒数)
+    """
+    files = sorted(Path(p) for p in file_list)
+    success_count = 0
+    skipped_count = 0
+    start_time = datetime.now()
+
+    first_style = style.split(',')[0].strip() if style else 'strip'
+
+    for i, img_file in enumerate(files, 1):
+        print(f"[{i}/{len(files)}] 处理: {img_file.name}")
+        output_name = OUTPUT_FILENAME_FORMAT.format(name=img_file.stem, style=first_style)
+        output_file = img_file.parent / f"{output_name}{img_file.suffix}"
+
+        status = process_single_image(str(img_file), str(output_file), style, custom_text, **kwargs)
+        if status == 'ok':
+            success_count += 1
+        elif status == 'skipped':
+            skipped_count += 1
+        else:
+            print(f"  -> 处理失败")
+
+    elapsed_time = (datetime.now() - start_time).total_seconds()
+    return success_count, skipped_count, len(files), elapsed_time
+
+
 def main():
     # 显示项目信息
     print("=" * 50)
     print("  Photo Watermark - 相机照片水印边框生成器")
-    print("  版本: v1.4.1")
+    print("  版本: v1.5.0")
     print("  项目: https://github.com/go-farther-and-farther/photo_watermark")
     print("=" * 50)
     print()
@@ -1294,16 +1986,16 @@ def main():
     # 显示配置状态提示
     tips = []
     if not DEFAULT_INPUT:
-        tips.append("DEFAULT_INPUT 未设置，将弹出选择对话框")
+        tips.append("默认输入路径未设置，将弹出窗口选择照片")
     if not DEFAULT_OUTPUT:
-        tips.append("DEFAULT_OUTPUT 未设置，将自动命名输出文件")
+        tips.append("默认输出路径未设置，将自动保存（照片旁/watermark_output）")
     if not DEFAULT_LOGO:
         tips.append("DEFAULT_LOGO 未设置，将根据品牌自动匹配")
     if DEFAULT_TEXT:
         tips.append(f"自定义文字: {DEFAULT_TEXT}")
 
     if tips:
-        print("[提示] 提示（可在 config.py 中修改）:")
+        print("[提示] 提示（可在 水印设置.ini 中修改）:")
         for tip in tips:
             print(f"   - {tip}")
         print()
@@ -1331,17 +2023,17 @@ def main():
         'input',
         nargs='?',
         default=DEFAULT_INPUT if DEFAULT_INPUT else None,
-        help='输入图片路径或文件夹路径（默认: config.py配置，留空则弹出选择）',
+        help='输入图片路径或文件夹路径（留空则弹出窗口选择照片/文件夹）',
     )
     parser.add_argument(
         '-o', '--output',
         default=DEFAULT_OUTPUT if DEFAULT_OUTPUT else None,
-        help='输出路径（默认: config.py配置，留空则在输入路径同级创建output文件夹）',
+        help='输出路径（留空则自动处理：照片输出到所在目录，文件夹输出到其下watermark_output）',
     )
     parser.add_argument(
         '-s', '--style',
         default=DEFAULT_STYLE,
-        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)，多样式用逗号分隔如 strip,blur',
+        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框), center(居中Logo)，多样式用逗号分隔如 strip,blur',
     )
     parser.add_argument(
         '-t', '--text',
@@ -1390,70 +2082,43 @@ def main():
     args = parser.parse_args()
 
     # 检查输入路径
-    # 如果args.input为None（config.py中DEFAULT_INPUT为空且未指定命令行参数），直接弹出选择
-    # 如果args.input有值但路径不存在，也弹出选择
+    # 未指定或路径不存在时，弹出图形界面让用户选择照片/文件夹
     input_path = None
+    multi_files = None
+    gui_mode = False  # GUI选择模式：处理完不退出，可继续选择
     if args.input:
         input_path = Path(args.input)
 
     if input_path is None or not input_path.exists():
+        if input_path and not input_path.exists():
+            print(f"路径不存在: {args.input}")
+
         try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            # 创建隐藏的主窗口
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-
-            if input_path and not input_path.exists():
-                print(f"路径不存在: {args.input}")
-
-            # 提示可以设置默认路径
-            if not DEFAULT_INPUT:
-                print("[提示] 提示: 在 config.py 中设置 DEFAULT_INPUT 可跳过此选择")
-                print()
-
-            # 询问用户选择文件还是文件夹
-            print("请选择要处理的内容：")
-            print("1. 选择单张图片")
-            print("2. 选择文件夹（批量处理）")
-
-            choice = input("请输入选择 (1/2): ").strip()
-
-            if choice == '1':
-                # 选择单张图片
-                filetypes = [
-                    ("图片文件", "*.jpg *.jpeg *.png *.tiff *.bmp"),
-                    ("所有文件", "*.*")
-                ]
-                selected = filedialog.askopenfilename(
-                    title="选择要处理的图片",
-                    filetypes=filetypes
-                )
-                if selected:
-                    input_path = Path(selected)
-                else:
-                    print("未选择文件，程序退出")
-                    sys.exit(0)
-            else:
-                # 选择文件夹
-                selected = filedialog.askdirectory(title="选择要处理的文件夹")
-                if selected:
-                    input_path = Path(selected)
-                else:
-                    print("未选择文件夹，程序退出")
-                    sys.exit(0)
-
-            root.destroy()
-            print(f"已选择: {input_path}")
-
+            selected, selected_style = select_paths_gui()
         except ImportError:
-            print(f"错误: 未指定输入路径，请通过命令行参数或config.py设置DEFAULT_INPUT")
+            print("错误: 未指定输入路径，请通过命令行参数或在 水印设置.ini 中设置「默认输入路径」")
             sys.exit(1)
 
+        if not selected:
+            print("未选择任何内容，程序退出")
+            sys.exit(0)
+
+        gui_mode = True
+
+        # 弹窗中选择的样式覆盖默认样式
+        if selected_style:
+            args.style = selected_style
+            print(f"已选择样式: {args.style}")
+
+        if len(selected) == 1:
+            input_path = Path(selected[0])
+            print(f"已选择: {input_path}")
+        else:
+            multi_files = selected
+            print(f"已选择 {len(multi_files)} 张照片")
+
     # 验证样式参数
-    valid_styles = {'strip', 'transparent', 'border', 'blur'}
+    valid_styles = {'strip', 'transparent', 'border', 'blur', 'center'}
     for s in args.style.split(','):
         if s.strip() not in valid_styles:
             print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")
@@ -1476,7 +2141,10 @@ def main():
     # 显示当前使用的配置
     print(f"[配置] 当前配置:")
     print(f"   样式: {args.style}")
-    print(f"   输入: {input_path}")
+    if multi_files:
+        print(f"   输入: {len(multi_files)} 张照片（图形界面选择）")
+    else:
+        print(f"   输入: {input_path}")
     if args.text:
         print(f"   自定义文字: {args.text}")
     if args.preview:
@@ -1484,7 +2152,7 @@ def main():
     print()
 
     # 预览模式：只处理第一张图片并显示
-    if args.preview and input_path.is_file():
+    if args.preview and input_path and input_path.is_file():
         print("预览模式：显示效果但不保存")
 
         # 智能样式选择
@@ -1511,72 +2179,150 @@ def main():
             result = apply_color_border(image, exif_data, args.text, **kwargs)
         elif style == 'blur':
             result = apply_blur_border(image, exif_data, args.text, **kwargs)
+        elif style == 'center':
+            result = apply_center_logo(image, exif_data, args.text, logo_path=args.logo)
 
         # 显示预览
         result.show()
         print("预览窗口已打开，关闭后程序继续")
         sys.exit(0)
 
-    # 判断是单张图片还是文件夹
-    if input_path.is_file():
-        # 单张图片处理
-        if args.output:
-            output_path = args.output
-        else:
-            # 使用配置的命名格式
-            output_name = OUTPUT_FILENAME_FORMAT.format(
-                name=input_path.stem,
-                style=args.style,
-            )
-            output_path = str(input_path.parent / f"{output_name}{input_path.suffix}")
+    # ========== 处理循环 ==========
+    # GUI选择模式下处理完不退出，自动回到选择窗口继续用；命令行模式处理一次后退出
+    while True:
+        if multi_files:
+            # 多张图片处理（图形界面多选，输出到各自所在目录）
+            print(f"批量处理 {len(multi_files)} 张照片（输出到照片所在目录）")
+            print("-" * 50)
 
-        print(f"处理图片: {input_path.name}")
-        if process_single_image(
-            str(input_path), output_path, args.style, args.text, **kwargs
-        ):
-            print(f"[成功] 完成! 保存到: {output_path}")
+            success, skipped, total, elapsed_time = process_multiple_files(
+                multi_files, args.style, args.text, **kwargs
+            )
+
+            print("-" * 50)
+            if success == total:
+                print(f"[成功] 全部完成: {success}/{total} 张照片处理成功")
+            else:
+                print(f"[警告] 部分完成: {success}/{total} 张照片处理成功")
+            if skipped:
+                print(f"[跳过] {skipped} 张照片输出已存在，未重新处理（可删除旧文件或在设置中开启覆盖）")
+            print(f"[用时]  用时: {elapsed_time:.1f} 秒")
+
+            # 控制台隐藏时自动打开所在文件夹，方便查看结果
+            if CONSOLE_HIDDEN and AUTO_OPEN_OUTPUT and sys.platform == 'win32':
+                os.startfile(os.path.abspath(str(Path(multi_files[0]).parent)))
+            # 控制台隐藏时提示结果（有失败或跳过时）
+            if CONSOLE_HIDDEN and (success < total or skipped):
+                msg = f"处理完成：{success}/{total} 张成功"
+                if skipped:
+                    msg += f"，{skipped} 张已存在被跳过"
+                notify("完成", msg)
+
+        elif input_path.is_file():
+            # 单张图片处理
+            if args.output:
+                output_path = args.output
+            else:
+                # 使用配置的命名格式
+                output_name = OUTPUT_FILENAME_FORMAT.format(
+                    name=input_path.stem,
+                    style=args.style,
+                )
+                output_path = str(input_path.parent / f"{output_name}{input_path.suffix}")
+
+            print(f"处理图片: {input_path.name}")
+            status = process_single_image(
+                str(input_path), output_path, args.style, args.text, **kwargs
+            )
+            if status == 'ok':
+                print(f"[成功] 完成! 保存到: {output_path}")
+                # 控制台隐藏时自动打开所在文件夹，方便查看结果
+                if CONSOLE_HIDDEN and AUTO_OPEN_OUTPUT and sys.platform == 'win32':
+                    os.startfile(os.path.abspath(str(Path(output_path).parent)))
+            elif status == 'skipped':
+                print(f"[跳过] 输出文件已存在，未重新处理: {Path(output_path).name}")
+                if CONSOLE_HIDDEN:
+                    notify("提示", f"输出文件已存在，未重新处理:\n{Path(output_path).name}")
+            else:
+                notify("处理失败", f"处理失败: {input_path.name}", is_error=True)
+                if not gui_mode:
+                    sys.exit(1)
+                # GUI模式：提示后回到选择窗口
+
+        elif input_path.is_dir():
+            # 批量处理
+            if args.output:
+                output_dir = args.output
+            else:
+                output_dir = str(input_path / "watermark_output")
+
+            print(f"批量处理文件夹: {input_path}")
+            print(f"输出目录: {output_dir}")
+            print("-" * 50)
+
+            success, skipped, total, elapsed_time = batch_process(
+                str(input_path), output_dir, args.style, args.text, **kwargs
+            )
+
+            print("-" * 50)
+            if success == total:
+                print(f"[成功] 全部完成: {success}/{total} 张图片处理成功")
+            else:
+                print(f"[警告]  部分完成: {success}/{total} 张图片处理成功")
+            if skipped:
+                print(f"[跳过] {skipped} 张图片输出已存在，未重新处理")
+            print(f"[用时]  用时: {elapsed_time:.1f} 秒")
+            print(f"[目录] 输出目录: {output_dir}")
+
+            # 自动打开输出目录（Windows）
+            if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
+                os.startfile(os.path.abspath(output_dir))
+            # 控制台隐藏时提示结果（有失败或跳过时）
+            if CONSOLE_HIDDEN and (success < total or skipped):
+                msg = f"处理完成：{success}/{total} 张成功"
+                if skipped:
+                    msg += f"，{skipped} 张已存在被跳过"
+                notify("完成", msg)
+
         else:
-            print("[失败] 处理失败!")
+            notify("错误", f"无效的输入路径 - {args.input}", is_error=True)
             sys.exit(1)
 
-    elif input_path.is_dir():
-        # 批量处理
-        if args.output:
-            output_dir = args.output
-        else:
-            output_dir = str(input_path / "watermark_output")
+        # 命令行模式：处理一次后退出
+        if not gui_mode:
+            break
 
-        print(f"批量处理文件夹: {input_path}")
-        print(f"输出目录: {output_dir}")
-        print("-" * 50)
-
-        success, total, elapsed_time = batch_process(
-            str(input_path), output_dir, args.style, args.text, **kwargs
-        )
-
-        print("-" * 50)
-        if success == total:
-            print(f"[成功] 全部完成: {success}/{total} 张图片处理成功")
-        else:
-            print(f"[警告]  部分完成: {success}/{total} 张图片处理成功")
-        print(f"[用时]  用时: {elapsed_time:.1f} 秒")
-        print(f"[目录] 输出目录: {output_dir}")
-
-        # 自动打开输出目录（Windows）
-        if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
-            os.startfile(os.path.abspath(output_dir))
-
-    else:
-        print(f"错误: 无效的输入路径 - {args.input}")
-        sys.exit(1)
-
-    # exe模式下等待用户确认，源码运行时直接退出
-    if getattr(sys, 'frozen', False):
+        # GUI模式：处理完成，回到选择窗口继续使用
         print()
-        print("=" * 50)
-        print("处理完成！")
-        print("=" * 50)
-        input("按回车键关闭...")
+        print("处理完成！可继续选择其他照片（点「取消」退出）")
+        try:
+            selected, selected_style = select_paths_gui()
+        except ImportError:
+            break
+        if not selected:
+            print("已退出")
+            break
+        if selected_style:
+            args.style = selected_style
+        if len(selected) == 1:
+            input_path = Path(selected[0])
+            multi_files = None
+            print(f"已选择: {input_path}")
+        else:
+            multi_files = selected
+            input_path = None
+            print(f"已选择 {len(multi_files)} 张照片")
+
+    # exe命令行模式：等待用户确认（隐藏控制台时用弹窗提示完成）
+    if getattr(sys, 'frozen', False) and not gui_mode:
+        if CONSOLE_HIDDEN:
+            notify("完成", "处理完成！")
+        else:
+            print()
+            print("=" * 50)
+            print("处理完成！")
+            print("=" * 50)
+            input("按回车键关闭...")
 
 
 if __name__ == '__main__':

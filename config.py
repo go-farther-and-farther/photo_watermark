@@ -21,18 +21,42 @@ SQUARE_STYLE = 'transparent'   # 方形照片默认样式
 # 默认Logo（留空则自动根据品牌选择）
 DEFAULT_LOGO = ''
 
+# 手动指定品牌（留空=自动识别EXIF品牌；指定如 'NIKON'/'XIAOMI' 则强制用该品牌匹配Logo，
+# 适合没有EXIF信息的手机照片。可在设置窗口里选择）
+DEFAULT_BRAND = ''
+
 # 默认自定义文字/签名（留空则不显示，命令行 --text 可覆盖）
 # 示例：'©我的签名'  'Photographer Name'
 DEFAULT_TEXT = ''
 
-# 默认输入路径（留空则每次弹出选择对话框）
-DEFAULT_INPUT = './input'
+# 默认输入路径（留空则弹出图形界面选择照片/文件夹，推荐；设置路径则不弹窗直接处理）
+DEFAULT_INPUT = ''
 
-# 默认输出路径（留空则在输入路径同级创建 output 文件夹）
-DEFAULT_OUTPUT = './output'
+# 默认输出路径（留空则自动处理：单张/多张照片输出到照片所在目录，文件夹输出到其下的 watermark_output）
+DEFAULT_OUTPUT = ''
 
 # JPEG输出质量 (1-100)，98 接近原图质量，文件大小合理
 JPEG_QUALITY = 100
+
+# JPEG色度采样（0=4:4:4 最清晰，1=4:2:2，2=4:2:0 文件最小）
+# 摄影师建议 0（保留完整色彩信息）；默认 0
+JPEG_SUBSAMPLING = 0
+
+# 是否显示控制台窗口（exe模式生效；源码运行时始终显示，便于调试）
+# False = 隐藏黑窗口（默认），处理完成/出错时用弹窗提示
+SHOW_CONSOLE_WINDOW = False
+
+# 边框背景图（留空=纯色背景；设置图片路径后，strip白条/纯色边框的底色用该图，可半透明）
+BORDER_BACKGROUND_IMAGE = ''
+
+# 边框背景图透明度 (0-255)，255=完全不透明，128=半透明（推荐），越小越透
+BORDER_BACKGROUND_OPACITY = 128
+
+# 居中Logo水印（center样式）Logo透明度 (0-255)，100=半透明
+CENTER_LOGO_OPACITY = 100
+
+# 居中Logo水印（center样式）Logo高度占图片高度的比例（0.05-0.30），0.12=适中
+CENTER_LOGO_RATIO = 0.12
 
 # 字体设置
 FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值

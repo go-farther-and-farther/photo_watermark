@@ -21,6 +21,7 @@ wheels/
 
 # PyInstaller
 *.spec
+dist/
 
 # Virtual Environment
 venv/
@@ -44,3 +45,6 @@ test_output*.jpg
 # OS
 .DS_Store
 Thumbs.db
+
+# Reference repos (cloned for study, not part of this project)
+Reference/

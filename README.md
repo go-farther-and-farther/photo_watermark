@@ -14,11 +14,20 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **四种水印样式**
+- **五种水印样式**
   - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
   - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
+  - `center` — 居中Logo水印（品牌Logo半透明居中，可加签名）
+
+- **自定义边框背景图**
+  - 可自由选择一张图片作为水印边框的背景（strip/纯色边框样式生效）
+  - 背景图透明度可调（半透明效果，照片边缘透出来更自然）
+
+- **图形化设置窗口**
+  - 选择窗口里点「设置...」，所有常用配置（签名、样式、背景图、透明度、颜色、输出等）都能在窗口里改，保存后立即生效
+  - 设置保存在 `水印设置.ini` 中，无需手动编辑文件
 
 - **支持批量处理**
   - 支持整个文件夹批量处理
@@ -32,8 +41,16 @@
 ### 方式1：直接运行exe（推荐）
 
 1. 下载 `photo_watermark.exe`
-2. 双击运行，会弹出文件选择对话框
-3. 选择图片或文件夹，自动处理并保存
+2. 双击运行，弹出窗口：
+   - 勾选水印样式（可多选，默认已选配置中的样式）
+   - 点「选择照片」（可多选）或「选择文件夹（批量处理）」
+3. 自动处理并保存：
+   - 单张/多张照片 → 输出到照片所在目录（自动命名）
+   - 文件夹 → 输出到其下的 `watermark_output` 文件夹
+4. 处理完**不会退出**，自动回到选择窗口，可继续选择下一批照片；点「取消」退出
+
+默认隐藏黑窗口（可在 `水印设置.ini` 中改「显示控制台窗口」），处理完成或出错时用弹窗提示。
+如果输出文件已存在，会跳过并提示（可删除旧文件，或在设置中开启覆盖）。
 
 ### 方式2：命令行运行
 
@@ -66,6 +83,17 @@ pip install -r requirements.txt
 
 ### 基本用法
 
+**方式A：图形界面选择（最常用，无需命令行）**
+
+双击exe（或运行 `python photo_watermark.py`），弹出窗口后：
+- 勾选水印样式（可多选，默认勾选配置中的样式）
+- 点「选择照片」→ 在资源管理器中可**多选**照片（Ctrl/Shift），处理结果保存到照片所在目录
+- 点「选择文件夹」→ 批量处理文件夹内所有照片，结果保存到其下的 `watermark_output` 文件夹
+- 点「设置...」→ 打开设置窗口，可改签名、样式、边框背景图（可半透明）、颜色、输出等，保存后立即生效
+- 处理完自动回到选择窗口，可继续处理下一批；点「取消」退出
+
+**方式B：命令行**
+
 ```bash
 # 处理单张图片（输出到同目录，自动命名）
 photo_watermark.exe input.jpg
@@ -94,6 +122,9 @@ photo_watermark.exe input.jpg --style border --border-color black
 
 # 模糊边框（推荐，效果自然）
 photo_watermark.exe input.jpg --style blur
+
+# 居中Logo水印
+photo_watermark.exe input.jpg --style center --text "©摄影师"
 ```
 
 ### 自定义文字
@@ -110,9 +141,9 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `input` | 输入图片或文件夹路径 | `config.py` 配置（留空则弹出选择） |
+| `input` | 输入图片或文件夹路径 | 留空则弹出窗口选择（`水印设置.ini` 可设置默认路径） |
 | `-o, --output` | 输出路径 | `config.py` 配置（留空则自动命名） |
-| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` | `config.py` 配置 |
+| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` / `center` | `config.py` 配置 |
 | `-t, --text` | 自定义水印文字 | 无 |
 | `-p, --position` | 半透明水印位置：`top-left` / `top-right` / `bottom-left` / `bottom-right` | `config.py` 配置 |
 | `--border-color` | 边框颜色（`black`/`white`/`gray` 或 RGB 如 `255,255,255`） | `config.py` 配置 |
@@ -121,43 +152,60 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 | `--quality` | JPEG输出质量（1-100） | `config.py` 配置 |
 | `--logo` | 自定义Logo图片路径 | 自动匹配品牌 |
 
-## 支持的相机品牌
+## 支持的品牌
 
-程序会根据照片EXIF中的相机品牌自动匹配对应的Logo：
+程序会根据照片EXIF中的品牌自动匹配对应的Logo（相机 + 手机/无人机）：
 
-| 品牌 | Logo文件 |
-|------|----------|
-| Nikon | `nikon_logo.png` |
-| Canon | `canon_logo.png` |
-| Sony | `sony_logo.png` |
-| Fujifilm | `fuji_logo.png` |
-| Hasselblad | `hasselblad_logo.jpeg` |
-| Olympus / OM System | `olympus_logo.jpeg` |
-| Pentax | `pentax_logo.jpeg` |
-| Panasonic | `panasonic_logo.jpeg` |
+| 品牌 | Logo文件 | 品牌 | Logo文件 |
+|------|----------|------|----------|
+| Nikon | `nikon_logo.png` | 小米 | `xiaomi_logo.png` |
+| Canon | `canon_logo.png` | 华为 | `huawei_logo.png` |
+| Sony | `sony_logo.png` | 荣耀 | `honor_logo.png` |
+| Fujifilm | `fuji_logo.png` | 苹果 | `apple_logo.png` |
+| Hasselblad | `hasselblad_logo.png` | 大疆 | `dji_logo.png` |
+| Olympus / OM System | `olympus_logo.png` | 三星 | `samsung_logo.png` |
+| Pentax | `pentax_logo.png` | 谷歌 | `google_logo.png` |
+| Panasonic | `panasonic_logo.png` | vivo / OPPO | `vivo_logo.png` / `oppo_logo.png` |
 
-未匹配到的品牌不使用 Logo。
+- 未匹配到品牌或 Logo 文件缺失时不使用 Logo（不影响水印文字）
+- 手机/无人机品牌的 Logo 文件可自行放入 `logos/` 文件夹（如 `xiaomi_logo.png`）
+- **手动指定品牌**：没有 EXIF 信息的照片（如部分手机照片），可在设置窗口 → 品牌 里手动指定，强制使用对应 Logo
 
 ## 自定义配置
 
-编辑 `config.py` 文件来自定义水印样式。所有参数都可以在配置文件中修改，无需命令行参数。
+**两种配置文件的关系：**
+
+| 文件 | 作用 | 需要手动改吗？ |
+|------|------|----------------|
+| `水印设置.ini` | 用户配置文件，GUI 设置窗口读写的就是它 | 一般不需要（设置窗口已覆盖常用项） |
+| `config.py` | 代码默认值（开发者/命令行兜底） | 一般不需要，仅高级用户 |
+
+程序启动时按 **ini > config.py > 内置默认值** 的顺序加载配置。exe 用户只需要 `水印设置.ini` 和 `logos/` 文件夹与 exe 放一起即可。
+
+**推荐方式：在设置窗口里改配置**（选择窗口 → 设置...），保存后立即生效，无需手动编辑任何文件。
 
 ### 通用设置
 
 ```python
-DEFAULT_STYLE = 'strip'         # 默认水印样式：strip / transparent / border / blur
-DEFAULT_INPUT = ''              # 默认输入路径（留空则每次弹出选择对话框）
-DEFAULT_OUTPUT = ''             # 默认输出路径（留空则在输入路径同级创建output文件夹）
+DEFAULT_STYLE = 'strip'         # 默认水印样式：strip / transparent / border / blur / center
+DEFAULT_INPUT = ''              # 默认输入路径（留空则弹出窗口选择）
+DEFAULT_OUTPUT = ''             # 默认输出路径（留空则自动处理，见下表）
 JPEG_QUALITY = 95               # JPEG输出质量 (1-100)
+JPEG_SUBSAMPLING = 0            # JPEG色度采样：0=4:4:4最清晰 1=4:2:2 2=4:2:0文件小
 FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
+SHOW_CONSOLE_WINDOW = False     # 是否显示控制台窗口（exe模式生效，False=隐藏黑窗口）
+BORDER_BACKGROUND_IMAGE = ''    # 边框背景图路径（留空=纯色背景）
+BORDER_BACKGROUND_OPACITY = 128 # 边框背景图透明度 (0-255)，128=半透明
+CENTER_LOGO_OPACITY = 100       # 居中Logo水印透明度 (0-255)
+CENTER_LOGO_RATIO = 0.12        # 居中Logo大小（占图片高度比例，0.05-0.30）
 ```
 
 **路径配置说明：**
 
-| 配置项 | 留空 `''` | 设置路径 |
+| 配置项 | 留空 `''`（推荐） | 设置路径 |
 |--------|-----------|----------|
-| `DEFAULT_INPUT` | 每次运行弹出文件选择对话框 | 直接使用该路径，不弹窗 |
-| `DEFAULT_OUTPUT` | 单张图片：`{原名}_{样式}_watermark.{ext}`；文件夹：创建 `watermark_output` | 输出到指定目录 |
+| `DEFAULT_INPUT` | 弹出窗口选择照片（可多选）或文件夹 | 直接使用该路径，不弹窗 |
+| `DEFAULT_OUTPUT` | 单张/多张照片：输出到照片所在目录 `{原名}_{样式}_watermark.{ext}`；文件夹：创建 `watermark_output` | 输出到指定目录 |
 
 ### strip 样式配置（白底黑字条形边框）
 
@@ -211,7 +259,7 @@ BLUR_TEXT_SHADOW = True                 # 是否添加文字阴影
 BLUR_CORNER_RADIUS = 0.05              # 圆角半径（相对于图片宽度），0 无圆角
 ```
 
-**注意：exe用户需要将 `config.py` 和 `logos/` 文件夹放在exe同目录下。**
+**注意：exe用户需要将 `config.py`、`水印设置.ini` 和 `logos/` 文件夹放在exe同目录下。**
 
 ## 效果预览
 
@@ -316,6 +364,8 @@ MIT License
 欢迎提交Issue和Pull Request！
 
 ## 致谢
+
+**依赖库：**
 
 - [Pillow](https://python-pillow.org/) - Python图像处理库
 - [exifread](https://github.com/ianare/exif-py) - EXIF信息读取库

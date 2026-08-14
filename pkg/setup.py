@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="photo-watermark",
-    version="1.4.1",
+    version="1.5.0",
     author="go-farther-and-farther",
     author_email="",
     description="相机照片水印边框生成器 - 自动读取EXIF信息，生成专业水印边框",
