@@ -1669,6 +1669,92 @@ def open_settings_window(parent=None) -> bool:
     return saved['flag']
 
 
+# 水印样式选项（GUI勾选框/样式选择窗口共用）
+STYLE_OPTIONS = [
+    ('strip', '白底条形', '照片下方参数条，尼康/佳能风格'),
+    ('transparent', '半透明', '文字直接叠加在照片上'),
+    ('border', '纯色边框', '边框包裹照片，底部显示参数'),
+    ('blur', '模糊边框', '边缘模糊背景，效果自然'),
+]
+
+
+def choose_style_gui(default_style: str = '') -> str:
+    """
+    弹出水印样式选择窗口（拖拽照片到exe后，跳过选图直接选择样式）
+
+    Args:
+        default_style: 默认勾选的样式（逗号分隔多选）
+
+    Returns:
+        选中的样式字符串（逗号分隔）；用户取消返回 ''
+    """
+    import tkinter as tk
+    from tkinter import ttk, font as tkfont
+
+    root = tk.Tk()
+    root.title("Photo Watermark - 选择水印样式")
+    root.attributes('-topmost', True)
+    root.resizable(False, False)
+
+    # 中文字体
+    try:
+        families = set(tkfont.families(root))
+        for name in ("Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "微软雅黑"):
+            if name in families:
+                tkfont.nametofont("TkDefaultFont").configure(family=name, size=10)
+                break
+    except Exception:
+        pass
+
+    base_font = tkfont.nametofont("TkDefaultFont")
+    small_font = base_font.copy()
+    small_font.configure(size=9)
+
+    default_styles = [s.strip() for s in (default_style or DEFAULT_STYLE).split(',') if s.strip()] or ['strip']
+    style_vars = {}
+    for key, _, _ in STYLE_OPTIONS:
+        style_vars[key] = tk.BooleanVar(value=(key in default_styles))
+
+    result = {'style': ''}
+
+    def confirm():
+        checked = [k for k, _, _ in STYLE_OPTIONS if style_vars[k].get()]
+        result['style'] = ','.join(checked) if checked else 'strip'
+        root.destroy()
+
+    # 布局
+    frame = tk.Frame(root, padx=26, pady=18)
+    frame.pack(fill='both', expand=True)
+
+    tk.Label(frame, text="请选择水印样式（可多选）：", font=base_font).pack(anchor='w', pady=(0, 8))
+
+    sf = ttk.LabelFrame(frame, text=" 水印样式 ", padding=10)
+    sf.pack(fill='x', pady=(0, 12))
+    for i, (key, label, desc) in enumerate(STYLE_OPTIONS):
+        row = i // 2
+        col = i % 2
+        cell = ttk.Frame(sf)
+        cell.grid(row=row, column=col, sticky='w', padx=(0, 30), pady=3)
+        ttk.Checkbutton(cell, text=label, variable=style_vars[key]).pack(anchor='w')
+        ttk.Label(cell, text=desc, foreground='#808080', font=small_font).pack(anchor='w', padx=(20, 0))
+
+    btns = ttk.Frame(frame)
+    btns.pack()
+    ttk.Button(btns, text="开始处理", command=confirm, width=14).pack(side='left', padx=6)
+    ttk.Button(btns, text="取消", command=root.destroy, width=14).pack(side='left', padx=6)
+
+    # 居中显示
+    root.update_idletasks()
+    w = max(root.winfo_reqwidth(), 480)
+    h = root.winfo_reqheight()
+    x = (root.winfo_screenwidth() - w) // 2
+    y = (root.winfo_screenheight() - h) // 3
+    root.geometry(f"{w}x{h}+{x}+{y}")
+
+    root.mainloop()
+    return result['style']
+
+
 def select_paths_gui() -> tuple:
     """
     弹出图形界面让用户选择水印样式、照片文件（可多选）或文件夹
@@ -1711,12 +1797,7 @@ def select_paths_gui() -> tuple:
     result = {'paths': None, 'style': ''}
 
     # 水印样式选项（可多选，默认勾选配置中的样式）
-    styles = [
-        ('strip', '白底条形', '照片下方参数条，尼康/佳能风格'),
-        ('transparent', '半透明', '文字直接叠加在照片上'),
-        ('border', '纯色边框', '边框包裹照片，底部显示参数'),
-        ('blur', '模糊边框', '边缘模糊背景，效果自然'),
-    ]
+    styles = STYLE_OPTIONS
     default_styles = [s.strip() for s in DEFAULT_STYLE.split(',') if s.strip()] or ['strip']
     style_vars = {}
     for key, _, _ in styles:
@@ -1942,9 +2023,9 @@ def main():
 
     parser.add_argument(
         'input',
-        nargs='?',
-        default=DEFAULT_INPUT if DEFAULT_INPUT else None,
-        help='输入图片路径或文件夹路径（留空则弹出窗口选择照片/文件夹）',
+        nargs='*',
+        default=None,
+        help='输入图片路径或文件夹路径（可多个，支持直接把照片/文件夹拖到exe上；留空则弹出窗口选择）',
     )
     parser.add_argument(
         '-o', '--output',
@@ -1953,8 +2034,8 @@ def main():
     )
     parser.add_argument(
         '-s', '--style',
-        default=DEFAULT_STYLE,
-        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)，多样式用逗号分隔如 strip,blur',
+        default=argparse.SUPPRESS,
+        help='边框样式: strip(白底条形), transparent(半透明), border(纯色边框), blur(模糊边框)，多样式用逗号分隔如 strip,blur；不指定且拖入多个文件时弹出样式选择窗口',
     )
     parser.add_argument(
         '-t', '--text',
@@ -2002,18 +2083,39 @@ def main():
 
     args = parser.parse_args()
 
-    # 检查输入路径
-    # 未指定或路径不存在时，弹出图形界面让用户选择照片/文件夹
+    # 是否显式指定了样式（未指定且拖入多个文件时，弹出样式选择窗口）
+    style_explicit = hasattr(args, 'style')
+    if not style_explicit:
+        args.style = DEFAULT_STYLE
+
+    # ===== 解析输入路径（支持多个，可把照片/文件夹拖到exe上） =====
     input_path = None
     multi_files = None
+    multi_dirs = None
     gui_mode = False  # GUI选择模式：处理完不退出，可继续选择
-    if args.input:
-        input_path = Path(args.input)
 
-    if input_path is None or not input_path.exists():
-        if input_path and not input_path.exists():
-            print(f"路径不存在: {args.input}")
+    raw_inputs = args.input
+    if isinstance(raw_inputs, str):
+        raw_inputs = [raw_inputs]
+    inputs = [p for p in (raw_inputs or []) if p]
+    if not inputs and DEFAULT_INPUT:
+        inputs = [DEFAULT_INPUT]
 
+    if inputs:
+        paths = [Path(p) for p in inputs]
+        for m in [p for p in paths if not p.exists()]:
+            print(f"路径不存在: {m}")
+        existing = [p for p in paths if p.exists()]
+        if existing:
+            files = sorted([p for p in existing if p.is_file()])
+            dirs = sorted([p for p in existing if p.is_dir()])
+            if files:
+                multi_files = files
+            if dirs:
+                multi_dirs = dirs
+
+    # 无有效输入 → 弹出图形界面选择照片/文件夹
+    if not input_path and not multi_files and not multi_dirs:
         try:
             selected, selected_style = select_paths_gui()
         except ImportError:
@@ -2037,6 +2139,21 @@ def main():
         else:
             multi_files = selected
             print(f"已选择 {len(multi_files)} 张照片")
+
+    # 拖拽/命令行传入多个路径且未显式指定样式 → 弹出样式选择窗口（跳过选图）
+    total_inputs = (len(multi_files) if multi_files else 0) + (len(multi_dirs) if multi_dirs else 0)
+    if total_inputs > 1 and not style_explicit and not gui_mode:
+        print(f"收到 {total_inputs} 个路径，请选择水印样式...")
+        try:
+            style_choice = choose_style_gui(args.style)
+        except ImportError:
+            style_choice = ''
+        if style_choice:
+            args.style = style_choice
+            print(f"已选择样式: {args.style}")
+        else:
+            print("已取消，退出")
+            sys.exit(0)
 
     # 验证样式参数
     valid_styles = {'strip', 'transparent', 'border', 'blur'}
@@ -2062,8 +2179,12 @@ def main():
     # 显示当前使用的配置
     print(f"[配置] 当前配置:")
     print(f"   样式: {args.style}")
-    if multi_files:
-        print(f"   输入: {len(multi_files)} 张照片（图形界面选择）")
+    if multi_files or multi_dirs:
+        n = (len(multi_files) if multi_files else 0) + (len(multi_dirs) if multi_dirs else 0)
+        if gui_mode:
+            print(f"   输入: {n} 个路径（图形界面选择）")
+        else:
+            print(f"   输入: {n} 个路径（拖拽/命令行传入）")
     else:
         print(f"   输入: {input_path}")
     if args.text:
@@ -2107,34 +2228,53 @@ def main():
         sys.exit(0)
 
     # ========== 处理循环 ==========
-    # GUI选择模式下处理完不退出，自动回到选择窗口继续用；命令行模式处理一次后退出
+    # GUI选择模式下处理完不退出，自动回到选择窗口继续用；命令行/拖拽模式处理一次后退出
     while True:
-        if multi_files:
-            # 多张图片处理（图形界面多选，输出到各自所在目录）
-            print(f"批量处理 {len(multi_files)} 张照片（输出到照片所在目录）")
-            print("-" * 50)
+        if multi_files or multi_dirs:
+            # 多文件/多文件夹处理（图形界面多选或拖拽传入）
+            total_success = 0
+            total_skipped = 0
+            total_count = 0
+            start_time = datetime.now()
 
-            success, skipped, total, elapsed_time = process_multiple_files(
-                multi_files, args.style, args.text, **kwargs
-            )
+            if multi_files:
+                print(f"批量处理 {len(multi_files)} 张照片（输出到照片所在目录）")
+                print("-" * 50)
+                s, sk, t, _ = process_multiple_files(multi_files, args.style, args.text, **kwargs)
+                total_success += s
+                total_skipped += sk
+                total_count += t
 
+            for d in (multi_dirs or []):
+                print(f"批量处理文件夹: {d}")
+                print(f"输出目录: {d / 'watermark_output'}")
+                print("-" * 50)
+                s, sk, t, _ = batch_process(
+                    str(d), str(d / 'watermark_output'), args.style, args.text, **kwargs
+                )
+                total_success += s
+                total_skipped += sk
+                total_count += t
+
+            elapsed_time = (datetime.now() - start_time).total_seconds()
             print("-" * 50)
-            if success == total:
-                print(f"[成功] 全部完成: {success}/{total} 张照片处理成功")
+            if total_success == total_count:
+                print(f"[成功] 全部完成: {total_success}/{total_count} 张照片处理成功")
             else:
-                print(f"[警告] 部分完成: {success}/{total} 张照片处理成功")
-            if skipped:
-                print(f"[跳过] {skipped} 张照片输出已存在，未重新处理（可删除旧文件或在设置中开启覆盖）")
+                print(f"[警告] 部分完成: {total_success}/{total_count} 张照片处理成功")
+            if total_skipped:
+                print(f"[跳过] {total_skipped} 张照片输出已存在，未重新处理（可删除旧文件或在设置中开启覆盖）")
             print(f"[用时]  用时: {elapsed_time:.1f} 秒")
 
             # 控制台隐藏时自动打开所在文件夹，方便查看结果
             if CONSOLE_HIDDEN and AUTO_OPEN_OUTPUT and sys.platform == 'win32':
-                os.startfile(os.path.abspath(str(Path(multi_files[0]).parent)))
+                first_dir = Path(multi_files[0]).parent if multi_files else multi_dirs[0]
+                os.startfile(os.path.abspath(str(first_dir)))
             # 控制台隐藏时提示结果（有失败或跳过时）
-            if CONSOLE_HIDDEN and (success < total or skipped):
-                msg = f"处理完成：{success}/{total} 张成功"
-                if skipped:
-                    msg += f"，{skipped} 张已存在被跳过"
+            if CONSOLE_HIDDEN and (total_success < total_count or total_skipped):
+                msg = f"处理完成：{total_success}/{total_count} 张成功"
+                if total_skipped:
+                    msg += f"，{total_skipped} 张已存在被跳过"
                 notify("完成", msg)
 
         elif input_path.is_file():
