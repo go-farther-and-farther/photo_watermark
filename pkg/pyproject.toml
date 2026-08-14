@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
     "Pillow>=10.0.0",
     "exifread>=3.0.0",
+    "tkinterdnd2>=0.4.0",
 ]
 
 [project.urls]

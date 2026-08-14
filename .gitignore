@@ -41,6 +41,9 @@ output/
 
 # Test files
 test_output*.jpg
+_etmp/
+_exe_t*/
+_test_*/
 
 # OS
 .DS_Store

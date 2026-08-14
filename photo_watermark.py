@@ -1777,16 +1777,24 @@ def select_paths_gui() -> tuple:
 
     窗口内容：
     - 水印样式选择（可多选，默认勾选配置中的样式）
-    - 选择照片：资源管理器中可按住 Ctrl/Shift 多选
-    - 选择文件夹：批量处理该文件夹内所有照片
+    - 可直接把照片/文件夹拖到窗口上（tkinterdnd2），或点按钮选择
+    - 品牌Logo下拉：本次处理可强制指定品牌Logo
+    - 选好后点「开始处理」
 
     Returns:
-        (路径列表, 样式字符串)；用户取消时返回 ([], '')
+        (路径列表, 样式字符串, 品牌代码)；用户取消时返回 ([], '', '')
     """
     import tkinter as tk
     from tkinter import filedialog, font as tkfont
 
-    root = tk.Tk()
+    # 启用窗口拖放（tkinterdnd2）；不支持时退回普通窗口
+    try:
+        from tkinterdnd2 import TkinterDnD, DND_FILES
+        root = TkinterDnD.Tk()
+        drop_supported = True
+    except Exception:
+        root = tk.Tk()
+        drop_supported = False
     root.title("Photo Watermark - 选择照片")
     root.attributes('-topmost', True)
     root.resizable(False, False)
@@ -1811,6 +1819,8 @@ def select_paths_gui() -> tuple:
     small_font.configure(size=9)
 
     result = {'paths': None, 'style': '', 'brand': ''}
+    status_var = tk.StringVar(
+        value="可把照片/文件夹直接拖到本窗口" if drop_supported else "点击下方按钮选择照片/文件夹")
 
     # 水印样式选项（可多选，默认勾选配置中的样式）
     styles = STYLE_OPTIONS
@@ -1827,6 +1837,12 @@ def select_paths_gui() -> tuple:
         checked = [k for k, _, _ in styles if style_vars[k].get()]
         return ','.join(checked) if checked else 'strip'
 
+    def set_files(paths):
+        """设置选中的路径并更新界面（按钮选择或窗口拖放）"""
+        result['paths'] = list(paths)
+        status_var.set(f"已选择 {len(result['paths'])} 个文件/文件夹，可调整样式后点「开始处理」")
+        btn_start.config(state='normal')
+
     def pick_files():
         filetypes = [
             ("图片文件", "*.jpg *.jpeg *.png *.tiff *.bmp"),
@@ -1838,10 +1854,7 @@ def select_paths_gui() -> tuple:
             parent=root,
         )
         if files:
-            result['paths'] = list(files)
-            result['style'] = get_style()
-            result['brand'] = _brand_code.get(brand_var.get(), '')
-            root.destroy()
+            set_files(files)
 
     def pick_folder():
         folder = filedialog.askdirectory(
@@ -1849,10 +1862,26 @@ def select_paths_gui() -> tuple:
             parent=root,
         )
         if folder:
-            result['paths'] = [folder]
-            result['style'] = get_style()
-            result['brand'] = _brand_code.get(brand_var.get(), '')
-            root.destroy()
+            set_files([folder])
+
+    def on_drop(event):
+        """窗口拖放：接收拖入的照片/文件夹路径"""
+        try:
+            paths = root.tk.splitlist(event.data)
+        except Exception:
+            paths = [p for p in event.data.split() if p]
+        if paths:
+            set_files(paths)
+
+    def confirm_start():
+        """开始处理：收集样式/品牌选择并关闭窗口"""
+        result['style'] = get_style()
+        result['brand'] = _brand_code.get(brand_var.get(), '')
+        root.destroy()
+
+    if drop_supported:
+        root.drop_target_register(DND_FILES)
+        root.dnd_bind('<<Drop>>', on_drop)
 
     def open_settings():
         """打开设置窗口，保存后刷新样式勾选"""
@@ -1919,12 +1948,18 @@ def select_paths_gui() -> tuple:
                  state='readonly', width=14).pack(side='left')
     ttk.Label(brand_row, text="（选「哈苏」等可强制使用该品牌Logo）",
               style='Desc.TLabel').pack(side='left', padx=8)
+    # 拖放/选择状态提示
+    ttk.Label(pf, textvariable=status_var, style='Desc.TLabel').pack(
+        anchor='w', padx=6, pady=(10, 2))
 
     # 底部按钮
     btm = ttk.Frame(frame)
     btm.grid(row=2, column=0, columnspan=2, sticky='ew')
     ttk.Button(btm, text="设置...", command=open_settings,
                style='Normal.TButton').pack(side='left')
+    btn_start = ttk.Button(btm, text="开始处理", command=confirm_start,
+                           style='Primary.TButton', state='disabled')
+    btn_start.pack(side='right', padx=(0, 6))
     ttk.Button(btm, text="取消", command=root.destroy,
                style='Normal.TButton').pack(side='right')
 

@@ -28,6 +28,7 @@ setup(
     install_requires=[
         "Pillow>=10.0.0",
         "exifread>=3.0.0",
+        "tkinterdnd2>=0.4.0",
     ],
     entry_points={
         "console_scripts": [
