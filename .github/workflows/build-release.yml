@@ -10,6 +10,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# 显式授予 GITHUB_TOKEN 写权限（否则创建 Release 会被 403 拒绝）
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
