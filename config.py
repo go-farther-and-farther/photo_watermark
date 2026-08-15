@@ -141,5 +141,5 @@ OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
 # 是否覆盖已存在的文件
 OVERWRITE_EXISTING = False
 
-# 处理完成后自动打开输出目录
-AUTO_OPEN_OUTPUT = True
+# 处理完成后自动打开输出目录（默认关闭；可在设置窗口勾选开启）
+AUTO_OPEN_OUTPUT = False
