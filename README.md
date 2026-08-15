@@ -384,3 +384,8 @@ MIT License
 
 - [Pillow](https://python-pillow.org/) - Python图像处理库
 - [exifread](https://github.com/ianare/exif-py) - EXIF信息读取库
+
+**AI 开发协助：**
+
+- [Claude](https://www.anthropic.com/claude) - 参与本项目早期版本的开发
+- [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) - AI 编程助手，参与 v1.5/v1.6 版本的 Logo 修复、实时预览、设置重构、界面美化等开发
