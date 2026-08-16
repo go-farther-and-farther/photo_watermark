@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.6'
+VERSION = 'v1.6.7'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -56,6 +56,23 @@ def get_base_dir() -> Path:
         return Path(__file__).parent
 
 
+def resource_path(name: str) -> str:
+    """
+    获取资源文件（logos、水印设置.ini）路径：
+    优先 exe 同目录下的文件（用户可覆盖/自定义），
+    否则用 exe 内嵌的默认资源（PyInstaller 解压到 sys._MEIPASS）。
+    这样单独把 exe 发给别人也能用（自带 logo 和默认配置）。
+    """
+    external = get_base_dir() / name
+    if external.exists():
+        return str(external)
+    if getattr(sys, 'frozen', False):
+        bundled = Path(sys._MEIPASS) / name
+        if bundled.exists():
+            return str(bundled)
+    return str(external)
+
+
 def load_ini_config() -> configparser.ConfigParser:
     """
     加载配置：默认配置（水印设置.ini）+ 个人配置（用户设置.ini）
@@ -64,7 +81,7 @@ def load_ini_config() -> configparser.ConfigParser:
     这样更新程序时个人设置保留在 用户设置.ini 中，不会被新版默认配置覆盖。
     """
     config = configparser.ConfigParser()
-    default_path = get_base_dir() / '水印设置.ini'
+    default_path = Path(resource_path('水印设置.ini'))
     user_path = get_base_dir() / '用户设置.ini'
 
     if default_path.exists():
@@ -558,8 +575,8 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
     # 清理品牌名称
     brand_upper = brand.upper().strip()
 
-    # Logo所在目录（默认为 logos/ 子目录）
-    logo_base = Path(logo_dir) if logo_dir else get_base_dir() / 'logos'
+    # Logo所在目录（默认为 logos/，优先 exe 旁，其次 exe 内嵌）
+    logo_base = Path(logo_dir) if logo_dir else Path(resource_path('logos'))
 
     # 查找匹配的Logo
     print(f"  品牌匹配: brand_upper=[{brand_upper}], logo_base=[{logo_base}]")
@@ -1994,7 +2011,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             return
         try:
             cp = configparser.ConfigParser()
-            dp = get_base_dir() / '水印设置.ini'
+            dp = Path(resource_path('水印设置.ini'))
             if dp.exists():
                 cp.read(dp, encoding='utf-8')
 
