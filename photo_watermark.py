@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.0'
+VERSION = 'v1.6.1'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -785,55 +785,20 @@ def apply_white_border(
     # 绘制文字
     draw = ImageDraw.Draw(new_image)
 
-    # ========== 左侧：使用模板格式化 ==========
-    line1_text = format_template(TEMPLATE_LINE1, exif_data)
-    line2_text = format_template(TEMPLATE_LINE2, exif_data)
-
-    # 垂直对齐计算
-    if STRIP_VALIGN == '上':
-        text_y = height + 4
-    elif STRIP_VALIGN == '下':
-        text_y = height + border_height - font_size * 2 - LINE_SPACING - 4
-    else:  # 中
-        text_y = margin_top
-
-    # 第一行（深色）
-    if line1_text:
-        draw.text(
-            (left_margin, text_y),
-            line1_text,
-            fill=COLOR_CAMERA,
-            font=font_bold,
-        )
-
-    # 第二行（灰色）
-    if line2_text:
-        draw.text(
-            (left_margin, text_y + font_size + LINE_SPACING),
-            line2_text,
-            fill=COLOR_LENS,
-            font=font,
-        )
-
-    # ========== 右侧：使用模板格式化 ==========
+    # ========== 右侧布局计算：参数 + Logo（先算位置，供左侧文字截断用） ==========
     params_text = format_template(TEMPLATE_PARAMS, exif_data)
     datetime_text = format_template(TEMPLATE_DATE, exif_data)
 
-    # 绘制参数（第一行右侧，最前面）
+    # 参数（第一行右侧，右对齐）
     params_x = right_x  # 默认右对齐
     if params_text:
         bbox = draw.textbbox((0, 0), params_text, font=font_bold)
         text_width = bbox[2] - bbox[0]
         params_x = right_x - text_width
-        draw.text(
-            (params_x, margin_top),
-            params_text,
-            fill=COLOR_PARAMS,
-            font=font_bold,
-        )
 
-    # 加载Logo（如果有）- 绘制Logo在参数左侧
+    # 加载Logo并定位（参数左侧）
     logo_width = 0
+    logo_x = params_x  # 无Logo时左侧文字右边界 = 参数左边界
     if logo_path and Path(logo_path).exists():
         try:
             logo = Image.open(logo_path)
@@ -872,6 +837,68 @@ def apply_white_border(
         except Exception as e:
             print(f"  [警告] Logo加载失败: {e}")
             print(f"     提示：将使用文字水印替代")
+            logo_x = params_x
+
+    # ========== 左侧文字（超宽自动截断，避免与右侧Logo/参数重叠） ==========
+    line1_text = format_template(TEMPLATE_LINE1, exif_data)
+    line2_text = format_template(TEMPLATE_LINE2, exif_data)
+
+    # 左侧文字可用宽度 = 左边界 到 Logo（或参数）左侧
+    left_text_max_x = logo_x - logo_params_spacing
+    if left_text_max_x <= left_margin + 30:
+        left_text_max_x = logo_x
+    left_avail = left_text_max_x - left_margin
+
+    def _truncate(text, fnt):
+        """超宽文本截断并加省略号，避免与Logo重叠"""
+        if not text:
+            return text
+        bbox = draw.textbbox((0, 0), text, font=fnt)
+        if bbox[2] - bbox[0] <= left_avail or left_avail < 40:
+            return text
+        result = text
+        while result and draw.textbbox((0, 0), result + '…', font=fnt)[2] > left_avail:
+            result = result[:-1]
+        return result + '…'
+
+    line1_text = _truncate(line1_text, font_bold)
+    line2_text = _truncate(line2_text, font)
+
+    # 垂直对齐计算
+    if STRIP_VALIGN == '上':
+        text_y = height + 4
+    elif STRIP_VALIGN == '下':
+        text_y = height + border_height - font_size * 2 - LINE_SPACING - 4
+    else:  # 中
+        text_y = margin_top
+
+    # 第一行（深色）
+    if line1_text:
+        draw.text(
+            (left_margin, text_y),
+            line1_text,
+            fill=COLOR_CAMERA,
+            font=font_bold,
+        )
+
+    # 第二行（灰色）
+    if line2_text:
+        draw.text(
+            (left_margin, text_y + font_size + LINE_SPACING),
+            line2_text,
+            fill=COLOR_LENS,
+            font=font,
+        )
+
+    # ========== 右侧绘制：参数 + 日期 ==========
+    # 绘制参数（第一行右侧，最前面）
+    if params_text:
+        draw.text(
+            (params_x, margin_top),
+            params_text,
+            fill=COLOR_PARAMS,
+            font=font_bold,
+        )
 
     # 绘制日期时间 + 自定义文字（第二行右侧）
     if datetime_text:
@@ -1775,7 +1802,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     _style_name = {k: lbl for k, lbl, _ in STYLE_OPTIONS}
     _style_code = {lbl: k for k, lbl, _ in STYLE_OPTIONS}
     v_style = tk.StringVar(value=_style_name.get(DEFAULT_STYLE.split(',')[0].strip(), '白底条形'))
-    _sub_map = {0: '4:4:4(最清晰)', 1: '4:2:2', 2: '4:2:0(文件小)'}
+    _sub_map = {0: '最高质量(文件最大)', 1: '平衡(推荐)', 2: '文件较小(画质略降)'}
     _sub_rev = {v: k for k, v in _sub_map.items()}
     v_sub_display = tk.StringVar(value=_sub_map.get(JPEG_SUBSAMPLING, _sub_map[0]))
     v_bg = tk.StringVar(value=BORDER_BACKGROUND_IMAGE)
@@ -1796,19 +1823,12 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
 
     # ===== 实时预览（嵌入设置窗口右侧） =====
     # 默认预览样式：主窗口勾选的第一个，否则用全局默认样式
-    _first_style = ''
-    for _s in (preview_styles or '').split(','):
-        if _s.strip():
-            _first_style = _s.strip()
-            break
-    if not _first_style:
-        _first_style = DEFAULT_STYLE.split(',')[0].strip() or 'strip'
     preview_state = {
         'seq': 0,
         'photo': preview_photo or get_demo_photo(),
-        'style': _first_style,
-        'photo_img': None,   # 保持 PhotoImage 引用防止被回收
-        'pending': None,     # 防抖用的 after id
+        'styles': [k for k, _, _ in STYLE_OPTIONS],  # 固定渲染四种样式（2x2 网格）
+        'photo_img': {},   # style -> PhotoImage 保持引用
+        'pending': None,   # 防抖用的 after id
     }
     _pos_rev = {'左上': 'top-left', '右上': 'top-right', '左下': 'bottom-left', '右下': 'bottom-right'}
 
@@ -1851,23 +1871,23 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             pass
 
     def _do_refresh_preview(seq):
-        if not preview_state['style']:
-            return
         # 在主线程读取所有 tkinter 控件值，再交给后台线程渲染
         brand = _brand_code.get(v_brand.get(), '') or preview_brand
         custom_text = v_text.get()
         overrides = build_preview_overrides()
         photo = preview_state['photo']
-        style = preview_state['style']
-        done = {'img': None, 'ready': False}
+        styles_list = preview_state['styles']
+        done = {'results': None, 'ready': False}
 
         def work():
-            img = render_preview(
-                photo, [style],
-                brand=brand, custom_text=custom_text,
-                overrides=overrides, max_size=1100,
-            )
-            done['img'] = img
+            results = {}
+            for st in styles_list:
+                results[st] = render_preview(
+                    photo, [st],
+                    brand=brand, custom_text=custom_text,
+                    overrides=overrides, max_size=800,
+                )
+            done['results'] = results
             done['ready'] = True
 
         threading.Thread(target=work, daemon=True).start()
@@ -1882,21 +1902,25 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
                 except Exception:
                     pass
                 return
-            _show_preview(done['img'])
+            _show_preview(done['results'])
 
         try:
             win.after(40, poll)
         except Exception:
             pass
 
-    def _show_preview(img):
-        if img is None:
-            preview_state['photo_img'] = None
-            pv_canvas.itemconfig(pv_img_id, image='')
-            return
-        photo = make_preview_photoimage(win, img, max_w=440, max_h=470)
-        preview_state['photo_img'] = photo
-        pv_canvas.itemconfig(pv_img_id, image=photo)
+    def _show_preview(results):
+        for st, (cv, cap_lb) in pv_cells.items():
+            img = results.get(st)
+            if img is None:
+                preview_state['photo_img'][st] = None
+                cv.itemconfig(pv_img_ids[st], image='')
+                cap_lb.config(foreground='#999999')
+                continue
+            photo = make_preview_photoimage(win, img, max_w=205, max_h=140)
+            preview_state['photo_img'][st] = photo  # 保持引用防止被回收
+            cv.itemconfig(pv_img_ids[st], image=photo)
+            cap_lb.config(foreground='#1f3a5f')
 
     def add_scale(parent, row, label, var, frm, to, fmt, divisor=1, tip=''):
         """一行：文字 + 滑杆 + 可编辑数值框（可输入任意数值，滑杆范围不变，实时生效）"""
@@ -2022,10 +2046,14 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     s_hdr.pack(fill='x')
     tk.Label(s_hdr, text="设置", font=('Microsoft YaHei UI', 13, 'bold'),
              bg='#1e3a5f', fg='#ffffff').pack(side='left', padx=14, pady=10)
-    tk.Label(s_hdr, text=f" v{VERSION} ", font=('Microsoft YaHei UI', 9),
+    tk.Label(s_hdr, text=VERSION, font=('Microsoft YaHei UI', 9),
              bg='#2e5a8f', fg='#d9e7f6', padx=6, pady=1).pack(side='left', pady=10)
     tk.Label(s_hdr, text="调整后预览即时更新，点「保存」生效", font=('Microsoft YaHei UI', 9),
-             bg='#1e3a5f', fg='#9db4d0').pack(side='right', padx=14, pady=10)
+             bg='#1e3a5f', fg='#9db4d0').pack(side='right', padx=(6, 14), pady=10)
+    reset_lb = tk.Label(s_hdr, text="恢复默认", font=('Microsoft YaHei UI', 9),
+                        bg='#1e3a5f', fg='#d9e7f6', cursor='hand2')
+    reset_lb.pack(side='right', padx=(0, 4), pady=10)
+    reset_lb.bind('<Button-1>', lambda e: on_restore_defaults())
     tk.Frame(win, height=2, bg='#2e5a8f').pack(fill='x')
 
     outer = ttk.Frame(win, padding=10)
@@ -2038,84 +2066,97 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     # ---------------- 总设置 ----------------
     tab_g = ttk.Frame(nb, padding=12)
     nb.add(tab_g, text="  总设置  ")
-    ttk.Label(tab_g, text="这些设置对所有水印样式生效", foreground='#808080').pack(
+    ttk.Label(tab_g, text="这些设置对所有水印样式生效", foreground='#666666').pack(
         anchor='w', pady=(0, 8))
-    g1 = ttk.LabelFrame(tab_g, text="通用", padding=10)
-    g1.pack(fill='x')
+    # 总设置按用途分组
+    g_wrap = ttk.Frame(tab_g)
+    g_wrap.pack(fill='x')
+
+    # 组1：水印文字与样式
+    g1 = ttk.LabelFrame(g_wrap, text="水印文字与样式", padding=10)
+    g1.grid(row=0, column=0, sticky='nsew', padx=(0, 6), pady=(0, 6))
     g1.columnconfigure(1, weight=1)
-
-    ttk.Label(g1, text="自定义文字/签名:").grid(row=0, column=0, sticky='w', pady=3)
-    e_text = ttk.Entry(g1, textvariable=v_text, width=26)
-    e_text.grid(row=0, column=1, columnspan=2, sticky='ew', pady=3)
+    ttk.Label(g1, text="自定义文字/签名:").grid(row=0, column=0, sticky='w', pady=5)
+    e_text = ttk.Entry(g1, textvariable=v_text, width=24)
+    e_text.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(e_text, "显示在水印上的自定义文字（如摄影师名字）。\n留空则不显示。\n示例：©我的名字")
-
-    ttk.Label(g1, text="默认样式:").grid(row=1, column=0, sticky='w', pady=3)
+    ttk.Label(g1, text="默认样式:").grid(row=1, column=0, sticky='w', pady=5)
     cb_style = ttk.Combobox(g1, textvariable=v_style,
                             values=[_style_name[k] for k, _, _ in STYLE_OPTIONS],
-                            state='readonly', width=24)
-    cb_style.grid(row=1, column=1, columnspan=2, sticky='ew', pady=3)
+                            state='readonly', width=22)
+    cb_style.grid(row=1, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_style, "默认使用的水印样式：\n白底条形 = 照片下方参数条（尼康/佳能风格）\n半透明 = 文字直接叠加在照片上\n纯色边框 = 边框包裹照片，底部显示参数\n模糊边框 = 边缘模糊背景，效果自然")
-
-    ttk.Label(g1, text="品牌(Logo):").grid(row=2, column=0, sticky='w', pady=3)
-    cb_brand = ttk.Combobox(g1, textvariable=v_brand,
-                            values=[n for n, _ in BRAND_OPTIONS], state='readonly', width=24)
-    cb_brand.grid(row=2, column=1, columnspan=2, sticky='ew', pady=3)
-    ToolTip(cb_brand, "固定使用的品牌Logo（如选「哈苏」就强制用哈苏Logo）。\n选「自动」则按照片EXIF里的相机品牌自动匹配。")
-
-    ttk.Label(g1, text="边框背景图:").grid(row=3, column=0, sticky='w', pady=3)
-    e_bg = ttk.Entry(g1, textvariable=v_bg, width=26)
-    e_bg.grid(row=3, column=1, sticky='ew', pady=3)
-    ToolTip(e_bg, "用一张图片作为水印边框的底色（strip白条/纯色边框样式生效）。\n留空 = 纯色背景。")
-    b_bg = ttk.Button(g1, text="浏览...", command=browse_bg)
-    b_bg.grid(row=3, column=2, padx=(4, 0), pady=3)
-
-    add_scale(g1, 4, "背景图透明度:", v_bg_alpha, 0, 255, "%d", 1,
-              tip="边框背景图的浓淡：\n255=完全不透明，128=半透明（推荐），越小越透。")
-    ttk.Label(g1, text="（255=不透明 128=半透明）", foreground='#808080').grid(
-        row=5, column=0, columnspan=3, sticky='w', pady=(0, 2))
-    add_scale(g1, 6, "JPEG质量:", v_quality, 50, 100, "%d", 1,
-              tip="输出照片的画质（1-100）：\n98 接近原图质量且文件合理，100 文件更大。")
-    ttk.Label(g1, text="（越大画质越好、文件越大）", foreground='#808080').grid(
-        row=7, column=0, columnspan=3, sticky='w', pady=(0, 2))
-    ttk.Label(g1, text="JPEG采样:").grid(row=8, column=0, sticky='w', pady=3)
-    cb_sub = ttk.Combobox(g1, textvariable=v_sub_display,
-                          values=[_sub_map[0], _sub_map[1], _sub_map[2]],
-                          state='readonly', width=24)
-    cb_sub.grid(row=8, column=1, columnspan=2, sticky='ew', pady=3)
-    ToolTip(cb_sub, "JPEG色彩采样方式：\n4:4:4 = 画质最好、文件最大\n4:2:0 = 文件最小、画质略降\n摄影师建议 4:4:4。")
-
-    cb_auto = ttk.Checkbutton(g1, text="处理完自动打开输出文件夹", variable=v_auto)
-    cb_auto.grid(row=9, column=0, columnspan=3, sticky='w', pady=3)
-    ToolTip(cb_auto, "处理完成后自动用资源管理器打开输出文件夹。\n默认关闭，需要时勾选。")
-    cb_console = ttk.Checkbutton(g1, text="显示控制台窗口（exe）", variable=v_console)
-    cb_console.grid(row=10, column=0, columnspan=3, sticky='w', pady=3)
-    ToolTip(cb_console, "显示黑色的命令行窗口（仅exe生效）。\n一般保持关闭，出错提示会用弹窗显示。")
     cb_smart = ttk.Checkbutton(g1, text="智能样式（按照片方向自动选）", variable=v_smart)
-    cb_smart.grid(row=11, column=0, columnspan=3, sticky='w', pady=3)
+    cb_smart.grid(row=2, column=0, columnspan=3, sticky='w', pady=5)
     ToolTip(cb_smart, "根据照片方向自动选择样式：\n横版 = 白条边框，竖版 = 模糊边框，方形 = 半透明。\n竖版照片用白条会过粗，推荐开启。")
+    ttk.Label(g1, text="默认品牌(无EXIF):").grid(row=3, column=0, sticky='w', pady=5)
+    cb_brand = ttk.Combobox(g1, textvariable=v_brand,
+                            values=[n for n, _ in BRAND_OPTIONS], state='readonly', width=22)
+    cb_brand.grid(row=3, column=1, columnspan=2, sticky='ew', pady=5)
+    ToolTip(cb_brand, "照片没有EXIF品牌信息时兜底使用的Logo（全局默认）。\n与主界面「品牌Logo」的区别：主界面那个是「本次处理强制指定」，\n这里是「平时默认」；主界面选了的优先于这里。")
+
+    # 组2：边框外观
+    g2 = ttk.LabelFrame(g_wrap, text="边框外观", padding=10)
+    g2.grid(row=0, column=1, sticky='nsew', padx=(6, 0), pady=(0, 6))
+    g2.columnconfigure(1, weight=1)
+    ttk.Label(g2, text="边框背景图:").grid(row=0, column=0, sticky='w', pady=5)
+    e_bg = ttk.Entry(g2, textvariable=v_bg, width=22)
+    e_bg.grid(row=0, column=1, sticky='ew', pady=5)
+    ToolTip(e_bg, "用一张图片作为水印边框的底色（strip白条/纯色边框样式生效）。\n留空 = 纯色背景。")
+    b_bg = ttk.Button(g2, text="浏览...", command=browse_bg)
+    b_bg.grid(row=0, column=2, padx=(4, 0), pady=5)
+    add_scale(g2, 1, "背景图透明度:", v_bg_alpha, 0, 255, "%d", 1,
+              tip="边框背景图的浓淡：\n255=完全不透明，128=半透明（推荐），0=全透明。")
+    ttk.Label(g2, text="（0=全透明 128=半透明 255=不透明）", foreground='#666666').grid(
+        row=2, column=0, columnspan=3, sticky='w', pady=(0, 2))
+
+    # 组3：输出设置
+    g3 = ttk.LabelFrame(g_wrap, text="输出设置", padding=10)
+    g3.grid(row=1, column=0, sticky='nsew', padx=(0, 6), pady=(6, 0))
+    g3.columnconfigure(1, weight=1)
+    add_scale(g3, 0, "JPEG质量:", v_quality, 50, 100, "%d", 1,
+              tip="输出照片的画质（1-100）：\n98 接近原图质量且文件合理，100 文件更大。")
+    ttk.Label(g3, text="（越大画质越好、文件越大）", foreground='#666666').grid(
+        row=1, column=0, columnspan=3, sticky='w', pady=(0, 2))
+    ttk.Label(g3, text="JPEG采样:").grid(row=2, column=0, sticky='w', pady=5)
+    cb_sub = ttk.Combobox(g3, textvariable=v_sub_display,
+                          values=[_sub_map[0], _sub_map[1], _sub_map[2]],
+                          state='readonly', width=22)
+    cb_sub.grid(row=2, column=1, columnspan=2, sticky='ew', pady=5)
+    ToolTip(cb_sub, "JPEG色彩采样方式（越靠前画质越好、文件越大）：\n最高质量(文件最大) = 4:4:4，适合摄影\n平衡(推荐) = 4:2:2\n文件较小 = 4:2:0，适合网络分享")
+    cb_auto = ttk.Checkbutton(g3, text="处理完自动打开输出文件夹", variable=v_auto)
+    cb_auto.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
+    ToolTip(cb_auto, "处理完成后自动用资源管理器打开输出文件夹。\n默认关闭，需要时勾选。")
+
+    # 组4：其他
+    g4 = ttk.LabelFrame(g_wrap, text="其他", padding=10)
+    g4.grid(row=1, column=1, sticky='nsew', padx=(6, 0), pady=(6, 0))
+    cb_console = ttk.Checkbutton(g4, text="显示控制台窗口（exe）", variable=v_console)
+    cb_console.grid(row=0, column=0, columnspan=3, sticky='w', pady=5)
+    ToolTip(cb_console, "显示黑色的命令行窗口（仅exe生效）。\n一般保持关闭，出错提示会用弹窗显示。")
 
     # ---------------- 样式设置 ----------------
     tab_s = ttk.Frame(nb, padding=12)
     nb.add(tab_s, text="  样式设置  ")
-    ttk.Label(tab_s, text="每种水印样式的参数单独调整", foreground='#808080').pack(
+    ttk.Label(tab_s, text="每种水印样式的参数单独调整", foreground='#666666').pack(
         anchor='w', pady=(0, 8))
 
     # 半透明水印
     f2 = ttk.LabelFrame(tab_s, text="半透明水印（transparent）", padding=10)
     f2.pack(fill='x', pady=(0, 8))
     f2.columnconfigure(1, weight=1)
-    ttk.Label(f2, text="位置:").grid(row=0, column=0, sticky='w', pady=3)
+    ttk.Label(f2, text="位置:").grid(row=0, column=0, sticky='w', pady=5)
     cb_pos = ttk.Combobox(f2, textvariable=v_pos, values=['左上', '右上', '左下', '右下'],
                           state='readonly', width=18)
-    cb_pos.grid(row=0, column=1, columnspan=2, sticky='ew', pady=3)
+    cb_pos.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_pos, "半透明水印文字显示在照片的哪个角落。")
     add_scale(f2, 1, "透明度:", v_alpha, 0, 255, "%d", 1,
               tip="水印文字的浓淡：\n0=完全透明（看不见），128=适中，255=完全不透明。")
-    ttk.Label(f2, text="（128=适中 200=很清晰）", foreground='#808080').grid(
+    ttk.Label(f2, text="（128=适中 200=很清晰）", foreground='#666666').grid(
         row=2, column=0, columnspan=3, sticky='w', pady=(0, 2))
     add_scale(f2, 3, "字体大小:", v_font, 10, 60, "%.3f", 1000,
               tip="水印文字大小（相对照片宽度的比例）：\n0.010=小，0.030=中，0.060=大。")
-    ttk.Label(f2, text="（0.020=小 0.030=中 0.040=大）", foreground='#808080').grid(
+    ttk.Label(f2, text="（0.020=小 0.030=中 0.040=大）", foreground='#666666').grid(
         row=4, column=0, columnspan=3, sticky='w', pady=(0, 2))
 
     # 白条边框
@@ -2124,60 +2165,55 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     f3.columnconfigure(1, weight=1)
     add_scale(f3, 0, "边框高度:", v_strip_h, 40, 150, "%.3f", 1000,
               tip="底部白色参数条的高度（占照片短边的比例）：\n0.05=窄，0.08=默认，0.10=宽。")
-    ttk.Label(f3, text="（0.05=窄 0.08=默认 0.10=宽）", foreground='#808080').grid(
+    ttk.Label(f3, text="（0.05=窄 0.08=默认 0.10=宽）", foreground='#666666').grid(
         row=1, column=0, columnspan=3, sticky='w', pady=(0, 2))
     add_scale(f3, 2, "Logo高度:", v_logo_h, 40, 100, "%.2f", 100,
               tip="品牌Logo的高度（占边框高度的比例）：\n0.50=小，0.70=默认，0.90=大。\n仅strip样式显示Logo。")
-    ttk.Label(f3, text="（0.50=小 0.70=默认 0.90=大，仅strip样式）", foreground='#808080').grid(
+    ttk.Label(f3, text="（0.50=小 0.70=默认 0.90=大，仅strip样式）", foreground='#666666').grid(
         row=3, column=0, columnspan=3, sticky='w', pady=(0, 2))
 
     # 纯色边框
     f6 = ttk.LabelFrame(tab_s, text="纯色边框（border）", padding=10)
     f6.pack(fill='x')
     f6.columnconfigure(1, weight=1)
-    ttk.Label(f6, text="边框颜色:").grid(row=0, column=0, sticky='w', pady=3)
+    ttk.Label(f6, text="边框颜色:").grid(row=0, column=0, sticky='w', pady=5)
     cb_bc = ttk.Combobox(f6, textvariable=v_border_color, values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
                          state='readonly', width=18)
-    cb_bc.grid(row=0, column=1, columnspan=2, sticky='ew', pady=3)
+    cb_bc.grid(row=0, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_bc, "纯色边框样式的边框颜色。")
-    ttk.Label(f6, text="边框文字颜色:").grid(row=1, column=0, sticky='w', pady=3)
+    ttk.Label(f6, text="边框文字颜色:").grid(row=1, column=0, sticky='w', pady=5)
     cb_bt = ttk.Combobox(f6, textvariable=v_border_text, values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
                          state='readonly', width=18)
-    cb_bt.grid(row=1, column=1, columnspan=2, sticky='ew', pady=3)
+    cb_bt.grid(row=1, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_bt, "纯色边框样式里参数文字的颜色。")
 
-    # ===== 右侧：实时预览 =====
-    f5 = ttk.LabelFrame(outer, text=" 实时预览 ", padding=8)
+    # ===== 右侧：实时预览（2x2 网格，四种样式同步更新） =====
+    f5 = ttk.LabelFrame(outer, text=" 实时预览（四种样式同步更新） ", padding=8)
     f5.grid(row=0, column=1, sticky='ns')
-    pv_top = ttk.Frame(f5)
-    pv_top.pack(fill='x', pady=(0, 6))
-    ttk.Label(pv_top, text="预览样式:").pack(side='left', padx=(0, 4))
-    pv_style_var = tk.StringVar(value=_style_name.get(preview_state['style'], '白底条形'))
-    cb_pvstyle = ttk.Combobox(pv_top, textvariable=pv_style_var,
-                              values=[_style_name[k] for k, _, _ in STYLE_OPTIONS],
-                              state='readonly', width=12)
-    cb_pvstyle.pack(side='left')
-    ttk.Label(pv_top, text="（调设置即时更新）", foreground='#808080').pack(
-        side='left', padx=10)
-    pv_style_var.trace_add(
-        'write',
-        lambda *a: (preview_state.update(style=_style_code.get(pv_style_var.get(), pv_style_var.get())),
-                    refresh_preview()),
-    )
-    # Canvas 固定预览区（像素单位，图片等比缩放居中显示，不被裁剪）
-    pv_canvas = tk.Canvas(f5, width=440, height=470, bg='#f2f2f2',
-                          highlightthickness=0, bd=0)
-    pv_canvas.pack()
-    pv_img_id = pv_canvas.create_image(220, 235, image='')
-    ttk.Label(f5, text="拖动滑杆 / 改颜色位置 / 改签名 → 立即看到效果，保存后才生效",
-              foreground='#808080').pack(anchor='w', pady=(6, 0))
+    pv_cells = {}     # style -> (canvas, caption_label)
+    pv_img_ids = {}   # style -> canvas item id
+    _pv_g = tk.Frame(f5)
+    _pv_g.pack()
+    for _i, (key, label, desc) in enumerate(STYLE_OPTIONS):
+        _r, _c = _i // 2, _i % 2
+        _cell = ttk.Frame(_pv_g)
+        _cell.grid(row=_r, column=_c, padx=4, pady=4, sticky='n')
+        _cv = tk.Canvas(_cell, width=205, height=140, bg='#f5f6f8',
+                        highlightthickness=1, highlightbackground='#d5dce8', bd=0)
+        _cv.pack()
+        _cap = ttk.Label(_cell, text=label, anchor='center')
+        _cap.pack(fill='x')
+        pv_cells[key] = (_cv, _cap)
+        pv_img_ids[key] = _cv.create_image(102, 70, image='')
+    ttk.Label(f5, text="拖动滑杆 / 改颜色位置 / 改签名 →\n四种样式即时更新，保存后生效",
+              foreground='#666666').pack(anchor='w', pady=(6, 0))
 
     # ===== 底部按钮 =====
     btns = ttk.Frame(outer)
-    btns.grid(row=1, column=0, columnspan=2, pady=(10, 0))
-    ttk.Button(btns, text="恢复默认", command=on_restore_defaults, width=12).pack(side='left', padx=6)
-    ttk.Button(btns, text="保存", command=on_save, width=14).pack(side='left', padx=6)
-    ttk.Button(btns, text="取消", command=win.destroy, width=14).pack(side='left', padx=6)
+    btns.grid(row=1, column=0, columnspan=2, pady=(14, 0))
+    ttk.Button(btns, text="取消", command=win.destroy, width=14).pack(side='right', padx=6)
+    ttk.Button(btns, text="保存", command=on_save, width=14,
+               style='Primary.TButton').pack(side='right', padx=6)
 
     # 窗口居中（贴合内容大小，避免右侧留白）
     win.update_idletasks()
@@ -2285,7 +2321,7 @@ def choose_style_gui(default_style: str = '') -> str:
         cell = ttk.Frame(sf)
         cell.grid(row=row, column=col, sticky='w', padx=(0, 30), pady=3)
         ttk.Checkbutton(cell, text=label, variable=style_vars[key]).pack(anchor='w')
-        ttk.Label(cell, text=desc, foreground='#808080', font=small_font).pack(anchor='w', padx=(20, 0))
+        ttk.Label(cell, text=desc, foreground='#666666', font=small_font).pack(anchor='w', padx=(20, 0))
 
     # 品牌Logo行（本次处理强制指定）
     brand_row = ttk.Frame(frame)
@@ -2294,7 +2330,7 @@ def choose_style_gui(default_style: str = '') -> str:
     ttk.Combobox(brand_row, textvariable=brand_var,
                  values=[n for n, _ in BRAND_OPTIONS],
                  state='readonly', width=14).pack(side='left')
-    ttk.Label(brand_row, text="（自动=按EXIF识别）", foreground='#808080',
+    ttk.Label(brand_row, text="（自动=按EXIF识别）", foreground='#666666',
               font=small_font).pack(side='left', padx=8)
 
     btns = ttk.Frame(frame)
@@ -2508,10 +2544,12 @@ def select_paths_gui() -> tuple:
     def _show_main_preview_all(results):
         for st, (cv, cap_lb) in pv_cells.items():
             img = results.get(st)
+            checked = style_vars[st].get()
             if img is None:
                 pv_state['photo_img'][st] = None
                 cv.itemconfig(pv_img_ids[st], image='')
-                cap_lb.config(foreground='#c0392b')
+                # 未勾选 → 灰色标注；已勾选但渲染失败 → 红色提示
+                cap_lb.config(foreground='#c0392b' if checked else '#999999')
                 continue
             # 删除“未勾选”占位文字
             ph_id = pv_placeholder_ids.get(st)
@@ -2521,10 +2559,10 @@ def select_paths_gui() -> tuple:
                 except Exception:
                     pass
                 pv_placeholder_ids[st] = None
-            photo = make_preview_photoimage(root, img, max_w=295, max_h=195)
+            photo = make_preview_photoimage(root, img, max_w=295, max_h=175)
             pv_state['photo_img'][st] = photo  # 保持引用防止被回收
             cv.itemconfig(pv_img_ids[st], image=photo)
-            cap_lb.config(foreground='#2b579a' if style_vars[st].get() else '#999999')
+            cap_lb.config(foreground='#1f3a5f' if checked else '#999999')
 
     def _show_main_preview_single(img):
         if img is None:
@@ -2614,10 +2652,10 @@ def select_paths_gui() -> tuple:
         except tk.TclError:
             pass
         style.configure('Header.TLabel', font=big_font, foreground='#2b579a')
-        style.configure('Sub.TLabel', font=small_font, foreground='#666666')
-        style.configure('Desc.TLabel', font=small_font, foreground='#808080')
-        style.configure('Primary.TButton', font=base_font, padding=(14, 8))
-        style.configure('Normal.TButton', font=base_font, padding=(12, 8))
+        style.configure('Sub.TLabel', font=small_font, foreground='#555555')
+        style.configure('Desc.TLabel', font=small_font, foreground='#555555')
+        style.configure('Primary.TButton', font=base_font, padding=(16, 9))
+        style.configure('Normal.TButton', font=base_font, padding=(14, 9))
     except Exception:
         style = None
 
@@ -2631,15 +2669,19 @@ def select_paths_gui() -> tuple:
              bg='#1e3a5f', fg='#ffffff').pack(side='left')
     tk.Label(title_row, text="· 照片水印", font=big_font,
              bg='#1e3a5f', fg='#a9c6ea').pack(side='left')
-    ver_badge = tk.Label(title_row, text=f" v{VERSION} ", font=small_font,
+    ver_badge = tk.Label(title_row, text=VERSION, font=small_font,
                          bg='#2e5a8f', fg='#d9e7f6', padx=6, pady=1)
     ver_badge.pack(side='left', padx=(10, 0))
+    set_lb = tk.Label(title_row, text="⚙ 设置", font=small_font,
+                      bg='#1e3a5f', fg='#d9e7f6', cursor='hand2')
+    set_lb.pack(side='right')
+    set_lb.bind('<Button-1>', lambda e: open_settings())
     tk.Label(header, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
              bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
     gh_row = tk.Frame(header, bg='#1e3a5f')
     gh_row.pack(pady=(0, 10))
     gh_lb = tk.Label(gh_row, text="GitHub 主页（源码 / 更新 / 反馈）", font=small_font,
-                     bg='#1e3a5f', fg='#7fa8d9', cursor='hand2')
+                     bg='#1e3a5f', fg='#9db8e0', cursor='hand2')
     gh_lb.pack(side='left')
     gh_lb.bind('<Button-1>', lambda e: webbrowser.open(PROJECT_URL))
     tk.Frame(header, height=2, bg='#2e5a8f').pack(fill='x')
@@ -2650,49 +2692,49 @@ def select_paths_gui() -> tuple:
     # 左列：样式 + 照片选择 + 按钮
     left_col = tk.Frame(frame, bg='#f5f7fa')
     left_col.grid(row=0, column=0, sticky='nsew')
+    left_col.rowconfigure(1, weight=1)  # 照片选择区拉伸填满，消除底部留白
 
     # 样式选择区
-    sf = ttk.LabelFrame(left_col, text=" 水印样式（可多选） ", padding=10)
+    sf = ttk.LabelFrame(left_col, text=" 水印样式（可多选） ", padding=12)
     sf.grid(row=0, column=0, sticky='ew', pady=(0, 10))
     for i, (key, label, desc) in enumerate(styles):
         row = i // 2
         col = i % 2
         cell = ttk.Frame(sf)
-        cell.grid(row=row, column=col, sticky='w', padx=(0, 30), pady=3)
+        cell.grid(row=row, column=col, sticky='w', padx=(0, 32), pady=5)
         ttk.Checkbutton(cell, text=label, variable=style_vars[key]).pack(anchor='w')
-        ttk.Label(cell, text=desc, style='Desc.TLabel').pack(anchor='w', padx=(20, 0))
+        ttk.Label(cell, text=desc, style='Desc.TLabel').pack(anchor='w', padx=(22, 0), pady=(1, 0))
         # 勾选变化 → 即时刷新预览
         style_vars[key].trace_add('write', lambda *a: on_style_changed())
 
     # 照片选择区
     pf = ttk.LabelFrame(left_col, text=" 选择要处理的照片 ", padding=10)
-    pf.grid(row=1, column=0, sticky='ew', pady=(0, 10))
+    pf.grid(row=1, column=0, sticky='nsew', pady=(0, 10))
     btns_row = ttk.Frame(pf)
     btns_row.pack(fill='x')
     ttk.Button(btns_row, text="选择照片（可多选）", command=pick_files,
                style='Primary.TButton').pack(side='left', padx=6)
     ttk.Button(btns_row, text="选择文件夹（批量处理）", command=pick_folder,
                style='Primary.TButton').pack(side='left', padx=6)
+    # 拖放提示：作为照片选择卡片的副标题（与品牌行分离）
+    ttk.Label(pf, textvariable=status_var, style='Desc.TLabel').pack(
+        anchor='w', padx=6, pady=(8, 0))
     # 品牌Logo行（本次处理强制指定，自动=按EXIF识别）
     brand_row = ttk.Frame(pf)
     brand_row.pack(fill='x', pady=(8, 0))
-    ttk.Label(brand_row, text="品牌Logo:").pack(side='left', padx=(6, 4))
+    ttk.Label(brand_row, text="品牌Logo(本次):").pack(side='left', padx=(6, 4))
     brand_cb = ttk.Combobox(brand_row, textvariable=brand_var,
                             values=[n for n, _ in BRAND_OPTIONS],
                             state='readonly', width=14)
     brand_cb.pack(side='left')
     brand_var.trace_add('write', lambda *a: refresh_main_preview())
-    ttk.Label(brand_row, text="（选「哈苏」等可强制使用该品牌Logo）",
+    ttk.Label(brand_row, text="（本次处理强制，自动=按EXIF识别）",
               style='Desc.TLabel').pack(side='left', padx=8)
-    # 拖放/选择状态提示
-    ttk.Label(pf, textvariable=status_var, style='Desc.TLabel').pack(
-        anchor='w', padx=6, pady=(10, 2))
 
     # 底部按钮
     btm = ttk.Frame(left_col)
-    btm.grid(row=2, column=0, sticky='ew')
-    ttk.Button(btm, text="设置...", command=open_settings,
-               style='Normal.TButton').pack(side='left')
+    btm.grid(row=2, column=0, sticky='sew')
+    # 底部只保留流程按钮，靠右排列（“设置”已在标题栏右侧）
     btn_start = ttk.Button(btm, text="开始处理", command=confirm_start,
                            style='Primary.TButton', state='disabled')
     btn_start.pack(side='right', padx=(0, 6))
@@ -2718,15 +2760,15 @@ def select_paths_gui() -> tuple:
         _row, _col = _i // 2, _i % 2
         _cell = ttk.Frame(pv_grid_frame)
         _cell.grid(row=_row, column=_col, padx=6, pady=4, sticky='n')
-        _cv = tk.Canvas(_cell, width=300, height=200, bg='#f5f6f8',
+        _cv = tk.Canvas(_cell, width=300, height=180, bg='#f5f6f8',
                         highlightthickness=1, highlightbackground='#d5dce8', bd=0)
         _cv.pack()
         _cap = ttk.Label(_cell, text=label, anchor='center')
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
-        pv_img_ids[key] = _cv.create_image(150, 100, image='')
+        pv_img_ids[key] = _cv.create_image(150, 90, image='')
         if not style_vars[key].get():
-            pv_placeholder_ids[key] = _cv.create_text(150, 100, text='未勾选', fill='#bbbbbb')
+            pv_placeholder_ids[key] = _cv.create_text(150, 90, text='未勾选', fill='#8a8a8a')
 
     # ---- 单个视图：大图 + 样式下拉 ----
     pv_single_frame = tk.Frame(pv_panel)
