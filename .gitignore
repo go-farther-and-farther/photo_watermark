@@ -44,6 +44,8 @@ test_output*.jpg
 _etmp/
 _exe_t*/
 _test_*/
+.pytest_cache/
+.pytest_tmp/
 
 # OS
 .DS_Store

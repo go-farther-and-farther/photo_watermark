@@ -31,6 +31,12 @@ except ImportError:
     print("错误: 请安装 exifread 库 - pip install exifread")
     sys.exit(1)
 
+# EXIF 查看窗口（快门数等），与主程序解耦的独立模块
+try:
+    from exif_viewer import open_exif_window
+except ImportError:
+    open_exif_window = None
+
 
 # 控制台输出容错：避免中文环境下重定向输出时因编码崩溃（如 © 等字符）
 if hasattr(sys.stdout, 'reconfigure'):
@@ -42,7 +48,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.7'
+VERSION = 'v1.7.0'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -2848,6 +2854,16 @@ def select_paths_gui() -> tuple:
                 style_vars[key].set(key in new_defaults)
             refresh_main_preview()
 
+    def open_exif_viewer(paths=None):
+        """打开 EXIF 信息查看窗口（快门数/拍摄参数），带当前已选路径"""
+        if open_exif_window is None:
+            notify("EXIF 查看器不可用", "exif_viewer 模块加载失败，请检查安装", is_error=True)
+            return
+        try:
+            open_exif_window(root, initial_paths=paths if paths else (result['paths'] or None))
+        except Exception as e:  # noqa: BLE001
+            notify("打开 EXIF 查看器失败", str(e), is_error=True)
+
     # ========== 界面布局 ==========
     from tkinter import ttk
 
@@ -2885,6 +2901,13 @@ def select_paths_gui() -> tuple:
                              cursor='hand2', padx=16, pady=5,
                              command=open_settings)
     btn_settings.pack(side='right')
+    # EXIF 信息查看（快门数等）：独立窗口，与设置按钮并列
+    btn_exif = tk.Button(title_row, text="📷 EXIF", font=base_font,
+                         bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
+                         activeforeground='#ffffff', relief='flat', bd=0,
+                         cursor='hand2', padx=16, pady=5,
+                         command=open_exif_viewer)
+    btn_exif.pack(side='right')
     tk.Label(header, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
              bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
     gh_row = tk.Frame(header, bg='#1e3a5f')
@@ -2925,6 +2948,8 @@ def select_paths_gui() -> tuple:
                style='Primary.TButton').pack(side='left', padx=6)
     ttk.Button(btns_row, text="选择文件夹（批量处理）", command=pick_folder,
                style='Primary.TButton').pack(side='left', padx=6)
+    ttk.Button(btns_row, text="查看EXIF", command=lambda: open_exif_viewer(),
+               style='Normal.TButton').pack(side='left', padx=6)
     # 品牌Logo行（本次处理强制指定，自动=按EXIF识别）
     brand_row = ttk.Frame(pf)
     brand_row.pack(fill='x', pady=(8, 0))
