@@ -1647,19 +1647,17 @@ _PREVIEW_LOCK = threading.Lock()
 def get_demo_photo() -> str:
     """
     查找默认预览照片（带真实EXIF）：
-    1. 配置指定的「默认预览照片」（绝对路径或相对程序目录）
+    1. 配置指定的「默认预览照片」（绝对路径或相对程序目录；优先 exe 旁文件，其次 exe 内嵌）
     2. 否则用 input/ 文件夹里的第一张图片
     用于主窗口未选照片、或设置窗口预览时展示效果。找不到返回 ''。
     """
-    # 1. 配置指定
+    # 1. 配置指定（exe 内嵌的演示图也能找到）
     if DEFAULT_PREVIEW_PHOTO:
-        p = Path(DEFAULT_PREVIEW_PHOTO)
-        if not p.is_absolute():
-            p = get_base_dir() / p
+        p = Path(resource_path(DEFAULT_PREVIEW_PHOTO))
         if p.is_file() and p.exists():
             return str(p)
-    # 2. input/ 文件夹第一张
-    base = get_base_dir() / 'input'
+    # 2. input/ 文件夹第一张（优先 exe 旁，其次内嵌）
+    base = Path(resource_path('input'))
     if not base.exists():
         return ''
     candidates = []

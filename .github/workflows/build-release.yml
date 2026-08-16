@@ -32,8 +32,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Build exe (onefile)
-        run: pyinstaller --onefile --name photo_watermark photo_watermark.py
+      - name: Build exe (onefile, 内嵌logo/配置/演示图)
+        # 用 spec 构建，确保内嵌 logos/、水印设置.ini、演示图 —— 单独发 exe 也能用
+        run: pyinstaller photo_watermark.spec --noconfirm
 
       - name: Package release zip (exe + config + ini + logos)
         shell: pwsh
