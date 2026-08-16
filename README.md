@@ -9,6 +9,12 @@
   - 光圈、快门速度、ISO、焦距
   - 文件创建日期
 
+- **EXIF 信息查看窗口（快门数）**
+  - 主窗口标题栏「📷 EXIF」按钮或选图区「查看EXIF」一键打开
+  - 拖入/选择 NEF、JPEG 等文件或整个文件夹，批量显示：机身、**快门数**、快门速度、光圈、ISO、焦距、拍摄时间、镜头
+  - 双击行查看完整信息；坏文件标红不中断
+  - 解析引擎自动选择：内置 ExifTool（完整版）→ exifread 精简解析（精简版）
+
 - **自动匹配品牌Logo**
   - 根据相机品牌自动选择对应Logo
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
