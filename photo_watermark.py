@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.5'
+VERSION = 'v1.6.6'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -543,16 +543,16 @@ def get_logo_by_brand(brand: str, logo_dir: str = '') -> str:
         'LEICA': 'leica_logo.png',           # 徕卡
         'PANASONIC': 'panasonic_logo.png',
         # 手机/无人机品牌（可自行放入对应 logo 文件）
-        'XIAOMI': 'xiaomi_logo.png',
-        'HUAWEI': 'huawei_logo.png',
+        'XIAOMI': 'xiaomi.png',
+        'HUAWEI': 'huawei-color.png',
         'HONOR': 'honor_logo.png',
         'APPLE': 'apple_logo.png',
         'IPHONE': 'apple_logo.png',
         'DJI': 'dji_logo.png',
         'SAMSUNG': 'samsung_logo.png',
         'GOOGLE': 'google_logo.png',
-        'VIVO': 'vivo_logo.png',
-        'OPPO': 'oppo_logo.png',
+        'VIVO': 'vivo.png',
+        'OPPO': 'Oppo-Logo.wine.png',
     }
 
     # 清理品牌名称
@@ -805,6 +805,9 @@ def apply_white_border(
     if logo_path and Path(logo_path).exists():
         try:
             logo = Image.open(logo_path)
+            # P模式（调色板）转 RGBA，保证透明通道正常（如 huawei-color.png）
+            if logo.mode == 'P':
+                logo = logo.convert('RGBA')
             print(f"  Logo文件: {Path(logo_path).name} (原始尺寸: {logo.width}x{logo.height})")
 
             # 裁剪 logo 四周空白边距（修复哈苏等白底大图 logo 显示过小的问题）
@@ -1338,9 +1341,9 @@ def process_single_image(
         # 解析样式列表（支持逗号分隔多选，分别输出）
         styles = [s.strip() for s in style.split(',') if s.strip()]
 
-        # 智能样式：按照片方向自动选择（需在旋转后判断；多样式时不覆盖用户选择）
+        # 智能样式：按照片方向自动选择（需在旋转后判断；多样式/用户显式选择时不覆盖）
         force_name = False
-        if SMART_STYLE == 'auto' and len(styles) == 1:
+        if SMART_STYLE == 'auto' and len(styles) == 1 and not kwargs.get('explicit_style'):
             ratio = image.width / image.height
             if ratio > 1.2:
                 resolved = LANDSCAPE_STYLE
@@ -3163,7 +3166,6 @@ def main():
     style_explicit = hasattr(args, 'style')
     if not style_explicit:
         args.style = DEFAULT_STYLE
-
     # ===== 解析输入路径（支持多个，可把照片/文件夹拖到exe上） =====
     input_path = None
     multi_files = None
@@ -3229,6 +3231,7 @@ def main():
             drag_brand = ''
         if style_choice:
             args.style = style_choice
+            style_explicit = True  # 拖拽弹窗里选过样式 → 视为显式选择
             print(f"已选择样式: {args.style}")
         else:
             print("已取消，退出")
@@ -3253,6 +3256,8 @@ def main():
         'opacity': args.opacity,
         'quality': args.quality,
         'logo_path': args.logo,
+        # 显式选择了样式（GUI勾选 / 拖拽弹窗 / 命令行 --style）→ 智能样式不覆盖
+        'explicit_style': bool(style_explicit or gui_mode or drag_brand != '' or gui_brand != ''),
     }
     # GUI/拖拽弹窗中强制指定的品牌Logo（本次处理覆盖自动识别）
     if gui_brand or drag_brand:
@@ -3362,8 +3367,8 @@ def main():
 
         elif input_path.is_file():
             # 单张图片处理
-            # 智能样式：仅当用户只选了一个样式时按方向自动选择（多选时尊重用户选择）
-            if SMART_STYLE == 'auto' and len(args.style.split(',')) == 1:
+            # 智能样式：仅当未显式选择样式时按方向自动选择（显式选择/多选尊重用户）
+            if SMART_STYLE == 'auto' and len(args.style.split(',')) == 1 and not kwargs.get('explicit_style'):
                 args.style = get_smart_style(str(input_path))
                 print(f"  智能样式: {args.style}（根据照片方向）")
             if args.output:
