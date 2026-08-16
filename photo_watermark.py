@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.2'
+VERSION = 'v1.6.3'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -2274,7 +2274,6 @@ def choose_style_gui(default_style: str = '') -> str:
 
     root = tk.Tk()
     root.title("Photo Watermark - 选择水印样式")
-    root.attributes('-topmost', True)
     root.resizable(False, False)
 
     # 中文字体
@@ -2384,7 +2383,6 @@ def select_paths_gui() -> tuple:
         root = tk.Tk()
         drop_supported = False
     root.title("Photo Watermark - 选择照片")
-    root.attributes('-topmost', True)
     root.resizable(False, False)
 
     # 尝试使用中文字体（微软雅黑），失败则用系统默认
@@ -2571,7 +2569,7 @@ def select_paths_gui() -> tuple:
                 except Exception:
                     pass
                 pv_placeholder_ids[st] = None
-            photo = make_preview_photoimage(root, img, max_w=295, max_h=175)
+            photo = make_preview_photoimage(root, img, max_w=315, max_h=205)
             pv_state['photo_img'][st] = photo  # 保持引用防止被回收
             cv.itemconfig(pv_img_ids[st], image=photo)
             cap_lb.config(foreground='#1f3a5f' if checked else '#999999')
@@ -2588,6 +2586,137 @@ def select_paths_gui() -> tuple:
     def update_preview_photo():
         pv_state['photo'] = _first_photo()
         refresh_main_preview()
+
+    # ===== 全屏预览 =====
+    fs_state = {'win': None, 'img': None, 'idx': 0}
+
+    def open_fullscreen():
+        """全屏预览当前照片的水印效果，◀ ▶ 切换样式，ESC 关闭"""
+        if fs_state['win'] is not None:
+            try:
+                fs_state['win'].lift()
+                return
+            except Exception:
+                fs_state['win'] = None
+        checked = _checked_styles()
+        if not checked:
+            return
+        win = tk.Toplevel(root)
+        win.attributes('-fullscreen', True)
+        win.configure(bg='black')
+        fs_state['win'] = win
+        fs_state['idx'] = 0
+        fs_state['img'] = None
+
+        # 顶部工具栏
+        bar = tk.Frame(win, bg='#111111')
+        bar.pack(fill='x')
+        tk.Label(bar, text='全屏预览', font=small_font, bg='#111111',
+                 fg='#aaaaaa').pack(side='left', padx=12, pady=6)
+        fs_style_lb = tk.Label(bar, text='', font=base_font, bg='#111111', fg='#ffffff')
+        fs_style_lb.pack(side='left', padx=8, pady=6)
+        tk.Button(bar, text='◀ 上一个样式', command=fs_prev, bg='#2e5a8f', fg='white',
+                  activebackground='#3a6ea5', relief='flat', padx=10, pady=3,
+                  cursor='hand2').pack(side='left', padx=(24, 4), pady=6)
+        tk.Button(bar, text='下一个样式 ▶', command=fs_next, bg='#2e5a8f', fg='white',
+                  activebackground='#3a6ea5', relief='flat', padx=10, pady=3,
+                  cursor='hand2').pack(side='left', padx=4, pady=6)
+        tk.Button(bar, text='✕ 关闭 (ESC)', command=fs_close, bg='#8a2b2b', fg='white',
+                  activebackground='#a53a3a', relief='flat', padx=12, pady=3,
+                  cursor='hand2').pack(side='right', padx=12, pady=6)
+
+        # 图片画布（铺满剩余空间）
+        cv = tk.Canvas(win, bg='black', highlightthickness=0)
+        cv.pack(fill='both', expand=True)
+        fs_state['cv'] = cv
+        fs_state['img_id'] = cv.create_image(0, 0, image='', anchor='nw')
+        fs_state['style_lb'] = fs_style_lb
+
+        win.bind('<Escape>', lambda e: fs_close())
+        win.bind('<Left>', lambda e: fs_prev())
+        win.bind('<Right>', lambda e: fs_next())
+        win.protocol('WM_DELETE_WINDOW', fs_close)
+        fs_render()
+
+    def _fs_checked():
+        return _checked_styles()
+
+    def fs_render():
+        checked = _fs_checked()
+        if not checked or fs_state['win'] is None:
+            return
+        fs_state['idx'] %= len(checked)
+        style = checked[fs_state['idx']]
+        brand = _brand_code.get(brand_var.get(), '')
+        photo = pv_state['photo']
+        custom_text = DEFAULT_TEXT
+        win = fs_state['win']
+        try:
+            fs_state['style_lb'].config(
+                text=f"{fs_state['idx'] + 1}/{len(checked)} · {_style_lbl.get(style, style)}")
+        except Exception:
+            pass
+        done = {'img': None, 'ready': False}
+
+        def work():
+            done['img'] = render_preview(photo, [style], brand=brand,
+                                         custom_text=custom_text, max_size=2400)
+            done['ready'] = True
+
+        threading.Thread(target=work, daemon=True).start()
+
+        def poll():
+            if fs_state['win'] is None:
+                return
+            if not done['ready']:
+                try:
+                    win.after(40, poll)
+                except Exception:
+                    pass
+                return
+            img = done['img']
+            if img is None:
+                return
+            sw = win.winfo_screenwidth() - 40
+            sh = win.winfo_screenheight() - 80
+            photo_img = make_preview_photoimage(win, img, max_w=sw, max_h=sh)
+            fs_state['img'] = photo_img
+            # 居中显示
+            cv = fs_state.get('cv')
+            if cv is not None:
+                cv.delete('all')
+                fs_state['img_id'] = cv.create_image(
+                    (cv.winfo_width() - photo_img.width()) // 2,
+                    (cv.winfo_height() - photo_img.height()) // 2,
+                    image=photo_img, anchor='nw')
+
+        try:
+            win.after(40, poll)
+        except Exception:
+            pass
+
+    def fs_prev():
+        checked = _fs_checked()
+        if checked:
+            fs_state['idx'] = (fs_state['idx'] - 1) % len(checked)
+            fs_render()
+
+    def fs_next():
+        checked = _fs_checked()
+        if checked:
+            fs_state['idx'] = (fs_state['idx'] + 1) % len(checked)
+            fs_render()
+
+    def fs_close():
+        if fs_state['win'] is not None:
+            try:
+                fs_state['win'].destroy()
+            except Exception:
+                pass
+            fs_state['win'] = None
+            fs_state['img'] = None
+
+    _style_lbl = {k: lbl for k, lbl, _ in styles}
 
     def get_style():
         checked = [k for k, _, _ in styles if style_vars[k].get()]
@@ -2684,16 +2813,19 @@ def select_paths_gui() -> tuple:
     ver_badge = tk.Label(title_row, text=VERSION, font=small_font,
                          bg='#2e5a8f', fg='#d9e7f6', padx=6, pady=1)
     ver_badge.pack(side='left', padx=(10, 0))
-    set_lb = tk.Label(title_row, text="⚙ 设置", font=small_font,
-                      bg='#1e3a5f', fg='#d9e7f6', cursor='hand2')
-    set_lb.pack(side='right')
-    set_lb.bind('<Button-1>', lambda e: open_settings())
+    # 设置：实体按钮（深蓝底上更醒目）
+    btn_settings = tk.Button(title_row, text="⚙ 设置", font=base_font,
+                             bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
+                             activeforeground='#ffffff', relief='flat', bd=0,
+                             cursor='hand2', padx=16, pady=5,
+                             command=open_settings)
+    btn_settings.pack(side='right')
     tk.Label(header, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
              bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
     gh_row = tk.Frame(header, bg='#1e3a5f')
     gh_row.pack(pady=(0, 10))
     gh_lb = tk.Label(gh_row, text="GitHub 主页（源码/更新/反馈）", font=small_font,
-                     bg='#1e3a5f', fg='#9db8e0', cursor='hand2')
+                     bg='#1e3a5f', fg='#bcd0ea', cursor='hand2')
     gh_lb.pack(side='left')
     gh_lb.bind('<Button-1>', lambda e: webbrowser.open(PROJECT_URL))
     tk.Frame(header, height=2, bg='#2e5a8f').pack(fill='x')
@@ -2728,9 +2860,6 @@ def select_paths_gui() -> tuple:
                style='Primary.TButton').pack(side='left', padx=6)
     ttk.Button(btns_row, text="选择文件夹（批量处理）", command=pick_folder,
                style='Primary.TButton').pack(side='left', padx=6)
-    # 拖放提示：作为照片选择卡片的副标题（与品牌行分离）
-    ttk.Label(pf, textvariable=status_var, style='Desc.TLabel').pack(
-        anchor='w', padx=6, pady=(8, 0))
     # 品牌Logo行（本次处理强制指定，自动=按EXIF识别）
     brand_row = ttk.Frame(pf)
     brand_row.pack(fill='x', pady=(8, 0))
@@ -2742,6 +2871,22 @@ def select_paths_gui() -> tuple:
     brand_var.trace_add('write', lambda *a: refresh_main_preview())
     ttk.Label(brand_row, text="（本次处理强制，自动=按EXIF识别）",
               style='Desc.TLabel').pack(side='left', padx=8)
+    # 拖放热区：虚线框填满卡片剩余空间，显示状态提示（也是拖放目标）
+    dz = tk.Canvas(pf, bg='#fafbfd', highlightthickness=1, highlightbackground='#c3cddd',
+                   bd=0, height=90)
+    dz.pack(fill='both', expand=True, padx=4, pady=(10, 2))
+
+    def _redraw_dz(event=None):
+        dz.delete('all')
+        w = dz.winfo_width()
+        h = dz.winfo_height()
+        if w > 24 and h > 24:
+            dz.create_rectangle(8, 8, w - 8, h - 8, dash=(6, 4), outline='#9fb0cc', width=1)
+            dz.create_text(w // 2, h // 2, text=status_var.get(), fill='#6a7a94',
+                           font=small_font)
+
+    dz.bind('<Configure>', _redraw_dz)
+    status_var.trace_add('write', lambda *a: _redraw_dz())
 
     # 底部按钮
     btm = ttk.Frame(left_col)
@@ -2756,7 +2901,7 @@ def select_paths_gui() -> tuple:
     # 右列：实时预览面板（全部视图 2x2 网格 / 单个视图大图）
     pv_panel = ttk.LabelFrame(frame, text=" 实时预览 ", padding=10)
     pv_panel.grid(row=0, column=1, sticky='n', padx=(14, 0))
-    # 视图切换（默认全部视图）
+    # 视图切换（默认全部视图）+ 全屏按钮
     pv_view_var = tk.StringVar(value='全部视图')
     view_row = ttk.Frame(pv_panel)
     view_row.pack(fill='x', pady=(0, 6))
@@ -2764,6 +2909,8 @@ def select_paths_gui() -> tuple:
                     command=lambda: set_view('all')).pack(side='left', padx=(0, 12))
     ttk.Radiobutton(view_row, text="单个视图", variable=pv_view_var, value='单个视图',
                     command=lambda: set_view('single')).pack(side='left')
+    ttk.Button(view_row, text="⛶ 全屏", command=open_fullscreen, width=6).pack(
+        side='right')
 
     # ---- 全部视图：2x2 网格 ----
     pv_grid_frame = tk.Frame(pv_panel, bg='#f5f7fa')
@@ -2772,15 +2919,15 @@ def select_paths_gui() -> tuple:
         _row, _col = _i // 2, _i % 2
         _cell = ttk.Frame(pv_grid_frame)
         _cell.grid(row=_row, column=_col, padx=6, pady=4, sticky='n')
-        _cv = tk.Canvas(_cell, width=300, height=180, bg='#f5f6f8',
+        _cv = tk.Canvas(_cell, width=320, height=210, bg='#f5f6f8',
                         highlightthickness=1, highlightbackground='#d5dce8', bd=0)
         _cv.pack()
         _cap = ttk.Label(_cell, text=label, anchor='center')
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
-        pv_img_ids[key] = _cv.create_image(150, 90, image='')
+        pv_img_ids[key] = _cv.create_image(160, 105, image='')
         if not style_vars[key].get():
-            pv_placeholder_ids[key] = _cv.create_text(150, 90, text='未勾选', fill='#6e6e6e')
+            pv_placeholder_ids[key] = _cv.create_text(160, 105, text='未勾选', fill='#6e6e6e')
 
     # ---- 单个视图：大图 + 样式下拉 ----
     pv_single_frame = tk.Frame(pv_panel)
@@ -2813,7 +2960,7 @@ def select_paths_gui() -> tuple:
 
     # 窗口居中显示：宽度/高度贴合内容（不留白）
     root.update_idletasks()
-    w = max(root.winfo_reqwidth(), 1160)
+    w = max(root.winfo_reqwidth(), 1180)
     h = max(root.winfo_reqheight(), 700)
     x = (root.winfo_screenwidth() - w) // 2
     y = (root.winfo_screenheight() - h) // 3
