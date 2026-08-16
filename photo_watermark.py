@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.3'
+VERSION = 'v1.6.4'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -153,6 +153,7 @@ BORDER_BACKGROUND_IMAGE = get_config_value('基础设置', '边框背景图', BO
 BORDER_BACKGROUND_OPACITY = get_config_value('基础设置', '边框背景图透明度', BORDER_BACKGROUND_OPACITY if 'BORDER_BACKGROUND_OPACITY' in dir() else 128, 'int')
 DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND if 'DEFAULT_BRAND' in dir() else '')
 DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT if 'DEFAULT_TEXT' in dir() else '')
+DEFAULT_PREVIEW_PHOTO = get_config_value('基础设置', '默认预览照片', DEFAULT_PREVIEW_PHOTO if 'DEFAULT_PREVIEW_PHOTO' in dir() else '')
 
 # 文字模板
 TEMPLATE_LINE1 = get_config_value('文字模板', '第一行格式', '{相机}')
@@ -256,6 +257,8 @@ if 'BORDER_BACKGROUND_OPACITY' not in dir():
     BORDER_BACKGROUND_OPACITY = 128
 if 'DEFAULT_BRAND' not in dir():
     DEFAULT_BRAND = ''
+if 'DEFAULT_PREVIEW_PHOTO' not in dir():
+    DEFAULT_PREVIEW_PHOTO = ''
 
 # ========== 控制台窗口显示控制（仅exe模式生效） ==========
 # 源码运行时始终显示控制台，方便调试；exe模式按配置隐藏
@@ -1623,9 +1626,19 @@ _PREVIEW_LOCK = threading.Lock()
 
 def get_demo_photo() -> str:
     """
-    查找默认预览照片：程序目录 input/ 文件夹里的第一张图片（带真实EXIF）。
+    查找默认预览照片（带真实EXIF）：
+    1. 配置指定的「默认预览照片」（绝对路径或相对程序目录）
+    2. 否则用 input/ 文件夹里的第一张图片
     用于主窗口未选照片、或设置窗口预览时展示效果。找不到返回 ''。
     """
+    # 1. 配置指定
+    if DEFAULT_PREVIEW_PHOTO:
+        p = Path(DEFAULT_PREVIEW_PHOTO)
+        if not p.is_absolute():
+            p = get_base_dir() / p
+        if p.is_file() and p.exists():
+            return str(p)
+    # 2. input/ 文件夹第一张
     base = get_base_dir() / 'input'
     if not base.exists():
         return ''

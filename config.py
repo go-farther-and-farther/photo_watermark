@@ -25,6 +25,10 @@ DEFAULT_LOGO = ''
 # 适合没有EXIF信息的手机照片。可在设置窗口里选择）
 DEFAULT_BRAND = ''
 
+# 默认预览照片（留空=自动用 input/ 文件夹里的第一张照片）。
+# 未选择照片时，主窗口/设置窗口的实时预览用它展示效果。支持相对程序目录的路径。
+DEFAULT_PREVIEW_PHOTO = ''
+
 # 默认自定义文字/签名（留空则不显示，命令行 --text 可覆盖）
 # 示例：'©我的签名'  'Photographer Name'
 DEFAULT_TEXT = ''
