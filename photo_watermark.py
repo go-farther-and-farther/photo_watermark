@@ -42,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.6.1'
+VERSION = 'v1.6.2'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -2205,7 +2205,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
         pv_img_ids[key] = _cv.create_image(102, 70, image='')
-    ttk.Label(f5, text="拖动滑杆 / 改颜色位置 / 改签名 →\n四种样式即时更新，保存后生效",
+    ttk.Label(f5, text="调整滑杆、颜色、位置或签名，\n四种样式会同步更新（保存后生效）",
               foreground='#666666').pack(anchor='w', pady=(6, 0))
 
     # ===== 底部按钮 =====
@@ -2459,9 +2459,13 @@ def select_paths_gui() -> tuple:
         except Exception:
             pass
 
-    def set_view(mode):
-        """切换预览视图：all=全部缩略图网格，single=单个大图"""
+    def _apply_view(mode):
+        """切换预览视图并同步单选按钮：all=全部网格，single=单个大图"""
         pv_state['view'] = mode
+        try:
+            pv_view_var.set('单个视图' if mode == 'single' else '全部视图')
+        except Exception:
+            pass
         _sync_single_style()
         if mode == 'single':
             pv_grid_frame.pack_forget()
@@ -2469,11 +2473,19 @@ def select_paths_gui() -> tuple:
         else:
             pv_single_frame.pack_forget()
             pv_grid_frame.pack()
+
+    def set_view(mode):
+        """单选按钮手动切换视图"""
+        _apply_view(mode)
         refresh_main_preview()
 
     def on_style_changed():
-        """样式勾选变化：同步单个视图下拉并刷新预览"""
+        """样式勾选变化：只勾一种时自动用单个视图（避免三个空格子），多选回全部视图"""
         _sync_single_style()
+        checked = _checked_styles()
+        target = 'single' if len(checked) == 1 else 'all'
+        if pv_state['view'] != target:
+            _apply_view(target)
         refresh_main_preview()
 
     def refresh_main_preview():
@@ -2653,7 +2665,7 @@ def select_paths_gui() -> tuple:
             pass
         style.configure('Header.TLabel', font=big_font, foreground='#2b579a')
         style.configure('Sub.TLabel', font=small_font, foreground='#555555')
-        style.configure('Desc.TLabel', font=small_font, foreground='#555555')
+        style.configure('Desc.TLabel', font=small_font, foreground='#4a4a4a')
         style.configure('Primary.TButton', font=base_font, padding=(16, 9))
         style.configure('Normal.TButton', font=base_font, padding=(14, 9))
     except Exception:
@@ -2680,7 +2692,7 @@ def select_paths_gui() -> tuple:
              bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
     gh_row = tk.Frame(header, bg='#1e3a5f')
     gh_row.pack(pady=(0, 10))
-    gh_lb = tk.Label(gh_row, text="GitHub 主页（源码 / 更新 / 反馈）", font=small_font,
+    gh_lb = tk.Label(gh_row, text="GitHub 主页（源码/更新/反馈）", font=small_font,
                      bg='#1e3a5f', fg='#9db8e0', cursor='hand2')
     gh_lb.pack(side='left')
     gh_lb.bind('<Button-1>', lambda e: webbrowser.open(PROJECT_URL))
@@ -2768,7 +2780,7 @@ def select_paths_gui() -> tuple:
         pv_cells[key] = (_cv, _cap)
         pv_img_ids[key] = _cv.create_image(150, 90, image='')
         if not style_vars[key].get():
-            pv_placeholder_ids[key] = _cv.create_text(150, 90, text='未勾选', fill='#8a8a8a')
+            pv_placeholder_ids[key] = _cv.create_text(150, 90, text='未勾选', fill='#6e6e6e')
 
     # ---- 单个视图：大图 + 样式下拉 ----
     pv_single_frame = tk.Frame(pv_panel)
@@ -2790,12 +2802,13 @@ def select_paths_gui() -> tuple:
     pv_single_cv.pack()
     pv_single_img_id = pv_single_cv.create_image(310, 280, image='')
 
-    ttk.Label(pv_panel, text="未选照片时显示 input/ 里的示例照片",
+    ttk.Label(pv_panel, text="未选照片时自动使用示例照片预览",
               style='Desc.TLabel').pack(anchor='w', pady=(6, 0))
 
-    # 样式勾选变化 → 同步单视图下拉 + 刷新（已在样式区绑定 on_style_changed）
-    # 初始化单视图状态并首次渲染（默认全部视图）
+    # 初始化预览视图（只勾了一种样式 → 自动单个视图）并首次渲染
     _sync_single_style()
+    if len(_checked_styles()) == 1:
+        _apply_view('single')
     refresh_main_preview()
 
     # 窗口居中显示：宽度/高度贴合内容（不留白）
