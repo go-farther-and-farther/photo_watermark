@@ -73,6 +73,25 @@ def resource_path(name: str) -> str:
     return str(external)
 
 
+def ensure_external_configs():
+    """
+    exe 无法修改自己（内嵌资源是只读的），配置必须保存在 exe 旁边的外部文件里。
+    启动时若 exe 旁边没有「水印设置.ini」，自动从内嵌资源生成一份，方便查看/修改默认配置。
+    个人配置「用户设置.ini」在保存设置时自动创建。
+    """
+    if not getattr(sys, 'frozen', False):
+        return  # 源码运行本来就有
+    try:
+        ini = get_base_dir() / '水印设置.ini'
+        if not ini.exists():
+            embedded = Path(sys._MEIPASS) / '水印设置.ini'
+            if embedded.exists():
+                ini.write_bytes(embedded.read_bytes())
+                print(f"[OK] 已生成默认配置文件: {ini.name}（可编辑，程序重启后生效）")
+    except Exception as e:
+        print(f"[警告] 生成配置文件失败: {e}")
+
+
 def load_ini_config() -> configparser.ConfigParser:
     """
     加载配置：默认配置（水印设置.ini）+ 个人配置（用户设置.ini）
@@ -2049,23 +2068,38 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             messagebox.showerror("恢复默认失败", f"恢复默认时出错：\n{e}", parent=win)
 
     def on_save():
-        update_ini_value('基础设置', '自定义文字', v_text.get())
-        update_ini_value('基础设置', '默认样式', _style_code.get(v_style.get(), v_style.get()))
-        update_ini_value('基础设置', '默认品牌', _brand_code.get(v_brand.get(), ''))
-        update_ini_value('基础设置', '边框背景图', v_bg.get())
-        update_ini_value('基础设置', '边框背景图透明度', str(v_bg_alpha.get()))
-        update_ini_value('基础设置', 'JPEG质量', str(v_quality.get()))
-        update_ini_value('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0)))
-        update_ini_value('基础设置', '自动打开输出', '是' if v_auto.get() else '否')
-        update_ini_value('基础设置', '显示控制台窗口', '是' if v_console.get() else '否')
-        update_ini_value('智能样式', '启用智能样式', '是' if v_smart.get() else '否')
-        update_ini_value('白条边框', '边框高度', fmt_float(v_strip_h.get() / 1000))
-        update_ini_value('白条边框', 'Logo高度', fmt_float(v_logo_h.get() / 100))
-        update_ini_value('半透明水印', '位置', v_pos.get())
-        update_ini_value('半透明水印', '透明度', str(v_alpha.get()))
-        update_ini_value('半透明水印', '字体大小', fmt_float(v_font.get() / 1000))
-        update_ini_value('颜色设置', '边框颜色', v_border_color.get())
-        update_ini_value('颜色设置', '边框文字颜色', v_border_text.get())
+        from tkinter import messagebox
+        save_items = [
+            ('基础设置', '自定义文字', v_text.get()),
+            ('基础设置', '默认样式', _style_code.get(v_style.get(), v_style.get())),
+            ('基础设置', '默认品牌', _brand_code.get(v_brand.get(), '')),
+            ('基础设置', '边框背景图', v_bg.get()),
+            ('基础设置', '边框背景图透明度', str(v_bg_alpha.get())),
+            ('基础设置', 'JPEG质量', str(v_quality.get())),
+            ('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0))),
+            ('基础设置', '自动打开输出', '是' if v_auto.get() else '否'),
+            ('基础设置', '显示控制台窗口', '是' if v_console.get() else '否'),
+            ('智能样式', '启用智能样式', '是' if v_smart.get() else '否'),
+            ('白条边框', '边框高度', fmt_float(v_strip_h.get() / 1000)),
+            ('白条边框', 'Logo高度', fmt_float(v_logo_h.get() / 100)),
+            ('半透明水印', '位置', v_pos.get()),
+            ('半透明水印', '透明度', str(v_alpha.get())),
+            ('半透明水印', '字体大小', fmt_float(v_font.get() / 1000)),
+            ('颜色设置', '边框颜色', v_border_color.get()),
+            ('颜色设置', '边框文字颜色', v_border_text.get()),
+        ]
+        failures = []
+        for sec, key, val in save_items:
+            if not update_ini_value(sec, key, val):
+                failures.append(f'{sec}.{key}')
+        if failures:
+            messagebox.showerror(
+                '保存失败',
+                f'以下设置未能保存（exe 所在文件夹可能没有写入权限）：\n'
+                f'{chr(10).join(failures)}\n\n'
+                f'配置文件位置：\n{get_base_dir() / "用户设置.ini"}',
+                parent=win)
+            return  # 不关窗口，让用户知道保存失败
         refresh_globals_from_ini()
         saved['flag'] = True
         win.destroy()
@@ -3071,6 +3105,9 @@ def process_multiple_files(
 
 
 def main():
+    # exe 旁边没有配置文件时自动生成（单独发 exe 也能保存设置）
+    ensure_external_configs()
+
     # 显示项目信息
     print("=" * 50)
     print("  Photo Watermark - 相机照片水印边框生成器")
