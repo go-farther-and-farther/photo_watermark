@@ -47,6 +47,9 @@ _test_*/
 .pytest_cache/
 .pytest_tmp/
 
+# 本地高清原图（demo_photo.jpg 的源文件，12MB 不入库）
+input/test_photo_4500w2.JPG
+
 # OS
 .DS_Store
 Thumbs.db

@@ -97,6 +97,8 @@ python photo_watermark.py input.jpg -o output.jpg
 - **`photo_watermark.exe`（完整版，约 35MB）**：内置 ExifTool，EXIF 查看窗口对任何品牌/格式（NEF、ARW、CR3 等）都能可靠读取，包括快门数
 - **`photo_watermark_lite.exe`（精简版，约 23MB）**：不内置 ExifTool，用 exifread 解析——Nikon 等常见机身可读快门数，冷门品牌可能读不到；本机已装 ExifTool 时也会自动调用
 
+> 许可说明：完整版内嵌的 [ExifTool](https://exiftool.org/)（Phil Harvey 著）采用 **Artistic License 1.0 / GPL 双许可**，允许随软件再分发，因此内置打包合法。精简版不含 ExifTool；其 exifread 为 MIT 许可的 Python 库。
+
 ### 源码安装
 
 ```bash

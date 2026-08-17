@@ -1,6 +1,6 @@
 # EXIF 查看器（快门数）开发记录
 
-> 记录时间：2026-08-16 · 会话交接文档
+> 记录时间：2026-08-16 · 会话交接文档（2026-08-17 更新：补齐 _MEIPASS 模拟测试、精简版启动冒烟、README 许可说明）
 > 需求：本地读取照片 EXIF（重点：**快门数**），不再上传网页查询；集成进 photo_watermark 水印工具，打两个包。
 
 ---
@@ -23,8 +23,9 @@
 | `photo_watermark.py` | 主程序改动：v1.7.0、导入 exif_viewer、标题栏/选图区两个按钮 |
 | `tests/test_exif_reader.py` | 10 个单元测试（exiftool + exifread 双引擎、批量、坏文件、文件夹） |
 | `pytest.ini` | `-p no:cacheprovider`（沙箱下 pytest 缓存目录写不了） |
-| `devtests/exif_smoke.py` | EXIF 窗口 GUI 冒烟测试（自动解析文件夹→校验行数→自关） |
+| `devtests/exif_smoke.py` | EXIF 窗口 GUI 冒烟测试（自动解析文件夹→行数稳定后自关，默认 Z30_101，可传参覆盖） |
 | `devtests/main_window_smoke.py` | 主窗口集成冒烟测试（自动点「📷 EXIF」按钮→校验 EXIF 窗口弹出） |
+| `devtests/meipass_sim.py` | 冻结环境 `_MEIPASS` 分支模拟测试（junction 模拟解压目录，验证命中内置 ExifTool 且真实解析 NEF） |
 | `photo_watermark.spec` | 完整版打包配置：`datas` 增加整个 ExifTool 目录 |
 | `photo_watermark_lite.spec` | 精简版打包配置（无 exiftool） |
 | `docs/superpowers/specs/2026-08-16-exif-viewer-design.md` | 设计文档 |
@@ -43,13 +44,13 @@
 4. **两个 exe 构建成功**：完整版 36.4MB / 精简版 22.8MB（`dist/`）
 5. **完整版内置 exiftool 可用性**：从 exe 包内解出 553 个文件（`exiftool\ExifTool.exe` + `exiftool_files\` 全树），运行 `-ver` → 13.59，读 DSC_0567.NEF → `ShutterCount: 571` ✓
 6. **完整版 exe 启动**：`dist\photo_watermark.exe` 启动正常，主窗口 "Photo Watermark - 选择照片" 出现，OCR 确认「📷 EXIF」「查看EXIF」按钮已渲染
-7. **git 已提交**（5 个 commit）：设计文档 → 功能 v1.7.0 → README ×2 → spec ×2
+7. **git 已提交**：设计文档 → 功能 v1.7.0 → README ×2 → spec ×2 → 交接文档（后续每次会话继续追加 commit）
+8. **冻结环境 `_MEIPASS` 分支模拟测试**（2026-08-17 补）：`python devtests/meipass_sim.py` → `sys._MEIPASS` 指向固定解压目录 `_exe_t1\extract\`（junction 指向本机 ExifTool 便携版，布局与 spec `datas→'exiftool'` 一致），`find_exiftool()` 命中内置 `exiftool\ExifTool.exe` ✓；用该"内置版"真实解析 `D:\photo\raw\Z6_101\DSC_0299.NEF` → NIKON Z 6、快门数 2219，与直接 exiftool 查询一致 ✓
+9. **精简版 exe 启动冒烟**（2026-08-17 补）：`dist\photo_watermark_lite.exe` 在 `danger-full-access` 下启动正常（workspace-write 沙箱禁止 PyInstaller 建 `_MEIxxxx` 临时目录，报 `[PYI:ERROR] Failed to create parent directory structure`——已知环境限制）。主窗口 "Photo Watermark - 选择照片" 出现；用 PrintWindow 抓窗 + OCR 确认「📷 EXIF」「查看EXIF」按钮均已渲染 ✓（本机装有系统 ExifTool，其 EXIF 窗口会显示「ExifTool 完整解析」——设计行为）
 
 ### ⚠️ 尚未完成（下次会话可补）
 
-1. **打包后 exe 内点击「📷 EXIF」的端到端验证**：沙箱/前台/坐标问题导致无法用脚本点击（环境问题，非产品缺陷）。用户手工验证：双击 exe → 点「📷 EXIF」→ 拖入 NEF 文件夹 → 应显示 19 行、快门数 505–571、右上角引擎标注「ExifTool 完整解析」
-2. **精简版 exe 启动冒烟**：还没启动过 `photo_watermark_lite.exe`（应正常启动；本机因装有系统 ExifTool，其 EXIF 窗口会显示「ExifTool 完整解析」——这是设计行为，exifread 回退路径已由单元测试覆盖）
-3. **冻结环境 `_MEIPASS` 分支模拟测试**：脚本已就绪（设置 `sys._MEIPASS` 指向解压目录后调 `find_exiftool` 应命中内置版），但沙箱每个进程的临时目录不同导致解压目录找不到，下次用固定路径（如 `D:\Software files\photo_watermark\_exe_t1\extract\`）重跑
+1. **打包后 exe 内点击「📷 EXIF」的端到端验证**：沙箱/前台/坐标问题导致无法用脚本点击（环境问题，非产品缺陷）。用户手工验证：双击 exe → 点「📷 EXIF」→ 拖入 NEF 文件夹（如 `D:\photo\raw\Z30_101`）→ 应显示全部行、快门数列有值、右上角引擎标注「ExifTool 完整解析」（注：原验收用文件夹 `101NZ7_2` 已被用户删除，快门数范围以实际照片为准）
 
 ## 4. 使用方法（用户视角）
 
@@ -74,9 +75,13 @@ python -m PyInstaller --noconfirm photo_watermark_lite.spec
 
 ```powershell
 python -m pytest -q                     # 单元测试（10 个）
-python devtests/exif_smoke.py           # EXIF 窗口冒烟（默认解析 101NZ7_2 文件夹）
+python devtests/exif_smoke.py           # EXIF 窗口冒烟（默认解析 Z30_101 文件夹，可传参覆盖；行数稳定后自关）
 python devtests/main_window_smoke.py    # 主窗口集成冒烟（自动点 EXIF 按钮）
+python devtests/meipass_sim.py          # _MEIPASS 分支模拟（需先建 junction：_exe_t1\extract\exiftool → %LOCALAPPDATA%\Programs\ExifTool）
 ```
+
+> meipass_sim 的 junction 建立命令（一次性）：
+> `New-Item -ItemType Junction -Path "_exe_t1\extract\exiftool" -Target "$env:LOCALAPPDATA\Programs\ExifTool"`
 
 ## 7. 关键技术点 / 踩坑记录
 
@@ -92,7 +97,7 @@ python devtests/main_window_smoke.py    # 主窗口集成冒烟（自动点 EXIF
 
 ## 8. 下一步建议
 
-- [ ] 用户手工验收两个 exe（完整版拖 NEF 文件夹；精简版装/不装 ExifTool 各试一次）
-- [ ] 精简版 exe 启动冒烟
-- [ ] 补 `_MEIPASS` 分支模拟测试（固定解压路径）
-- [ ] 如要发布，把 exiftool 目录的许可说明（ExifTool 为 Artistic/GPL 双许可，可再分发）写进 README
+- [ ] **用户手工验收两个 exe**（唯一剩余项）：完整版拖 NEF 文件夹看快门数列；精简版装/不装 ExifTool 各试一次（原验收文件夹 `101NZ7_2` 已删除，用任意现有 NEF 文件夹即可，如 `D:\photo\raw\Z30_101`）
+- [x] 精简版 exe 启动冒烟（2026-08-17：danger-full-access 下启动正常，PrintWindow+OCR 确认两按钮渲染）
+- [x] 补 `_MEIPASS` 分支模拟测试（2026-08-17：固定解压路径 + junction，命中内置版且解析正确）
+- [x] README 补充 ExifTool 许可说明（Artistic License 1.0 / GPL 双许可，可再分发；exifread 为 MIT）
