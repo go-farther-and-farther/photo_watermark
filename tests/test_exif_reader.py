@@ -15,7 +15,9 @@ from exif_reader import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 JPEG_PATH = PROJECT_ROOT / "input" / "demo_photo.jpg"
-NEF_PATH = Path(r"D:\photo\raw\101NZ7_2\DSC_0567.NEF")
+# NEF 样张取自本机照片库（快门数只存在于 RAW MakerNote，JPEG 无法覆盖该路径）；
+# 文件缺失时相关用例自动 skip（见 needs_nef），不影响其余测试。
+NEF_PATH = Path(r"D:\photo\raw\Z6_101\DSC_0299.NEF")   # NIKON Z 6 / 快门 2219 / F1.8 / 1/30s / ISO100 / 50mm
 
 needs_nef = pytest.mark.skipif(not NEF_PATH.exists(), reason="缺少 NEF 测试样张")
 needs_jpeg = pytest.mark.skipif(not JPEG_PATH.exists(), reason="缺少 JPEG 测试样张")
@@ -39,14 +41,14 @@ def test_exiftool_reads_nef_full_fields():
     assert r['ok'] is True
     assert r['engine'] == 'exiftool'
     assert r['error'] == ''
-    assert 'Z 7_2' in r['model']
-    assert r['shutter_count'] == 571
-    assert r['aperture'] == 'F4'
-    assert r['exposure'] == '1/8000s'
-    assert r['iso'] == 64
-    assert r['focal'] == '33mm'
-    assert 'NIKKOR Z 24-120mm f/4 S' in r['lens']
-    assert r['datetime'].startswith('2026-08-16')
+    assert 'Z 6' in r['model']
+    assert r['shutter_count'] == 2219
+    assert r['aperture'] == 'F1.8'
+    assert r['exposure'] == '1/30s'
+    assert r['iso'] == 100
+    assert r['focal'] == '50mm'
+    assert 'NIKKOR Z 50mm f/1.8 S' in r['lens']
+    assert r['datetime'].startswith('2024-04-12')
 
 
 @needs_jpeg
@@ -68,12 +70,12 @@ def test_exifread_reads_nef_including_shutter_count():
     assert r['ok'] is True
     assert r['engine'] == 'exifread'
     assert r['error'] == ''
-    assert 'Z 7_2' in r['model']
-    assert r['shutter_count'] == 571
-    assert r['aperture'] == 'F4'
-    assert r['exposure'] == '1/8000s'
-    assert r['iso'] == 64
-    assert r['focal'] == '33mm'
+    assert 'Z 6' in r['model']
+    assert r['shutter_count'] == 2219
+    assert r['aperture'] == 'F1.8'
+    assert r['exposure'] == '1/30s'
+    assert r['iso'] == 100
+    assert r['focal'] == '50mm'
 
 
 @needs_jpeg
@@ -91,7 +93,7 @@ def test_exifread_reads_jpeg():
 def test_read_exif_file_autodetect_uses_exiftool():
     r = read_exif_file(str(NEF_PATH))
     assert r['ok'] is True
-    assert r['shutter_count'] == 571
+    assert r['shutter_count'] == 2219
     assert r['engine'] in ('exiftool', 'exifread')
 
 
