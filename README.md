@@ -13,7 +13,7 @@
   - 主窗口标题栏「📷 EXIF」按钮或选图区「查看EXIF」一键打开
   - 拖入/选择 NEF、JPEG 等文件或整个文件夹，批量显示：机身、**快门数**、快门速度、光圈、ISO、焦距、拍摄时间、镜头
   - 双击行查看完整信息；坏文件标红不中断
-  - 解析引擎自动选择：内置 ExifTool（完整版）→ exifread 精简解析（精简版）
+  - 解析引擎自动选择：内置 ExifTool → 系统安装的 ExifTool → exifread 回退
 
 - **自动匹配品牌Logo**
   - 根据相机品牌自动选择对应Logo
@@ -93,9 +93,13 @@ python photo_watermark.py input.jpg -o output.jpg
 
 下载 `photo_watermark.exe`，无需安装Python环境。
 
-两个版本可选（功能完全一致，仅 EXIF 解析引擎不同）：
-- **`photo_watermark.exe`（完整版，约 35MB）**：内置 ExifTool，EXIF 查看窗口对任何品牌/格式（NEF、ARW、CR3 等）都能可靠读取，包括快门数
-- **`photo_watermark_lite.exe`（精简版，约 23MB）**：不内置 ExifTool，用 exifread 解析——Nikon 等常见机身可读快门数，冷门品牌可能读不到；本机已装 ExifTool 时也会自动调用
+两个版本可选（功能完全一致，仅是否内置 ExifTool 不同）：
+- **`photo_watermark.exe`（完整版，约 36MB）**：内置整个 ExifTool，在任何电脑上零依赖，对任何品牌/格式（NEF、ARW、CR3 等）都能可靠读取快门数
+- **`photo_watermark_lite.exe`（精简版，约 23MB）**：不内置 ExifTool。本机已装 ExifTool 时会自动调用，表现与完整版完全一致；未安装时回退 exifread 解析——Nikon 等常见机身可读快门数，冷门品牌可能读不到
+
+**怎么选？**
+- 只自己用、拍的是 Nikon 机身 → 精简版够用（省约 14MB）
+- 要发给别人 / 在未装 ExifTool 的电脑上用 / Sony、Canon、Fuji 等其他品牌 → 完整版，一个 exe 开箱即用
 
 > 许可说明：完整版内嵌的 [ExifTool](https://exiftool.org/)（Phil Harvey 著）采用 **Artistic License 1.0 / GPL 双许可**，允许随软件再分发，因此内置打包合法。精简版不含 ExifTool；其 exifread 为 MIT 许可的 Python 库。
 
