@@ -1510,11 +1510,13 @@ def apply_wordmark_style(
     draw = ImageDraw.Draw(img)
 
     target_h = max(16, int(width * size_ratio))
-    font_model = get_art_font(target_h)      # 机型文字用艺术字体
     font2 = get_font(max(12, int(width * params_ratio)))
 
     try:
         wm = Image.open(wm_path).convert('RGBA')
+        bb = wm.getchannel('A').getbbox()
+        if bb:
+            wm = wm.crop(bb)  # 紧凑裁剪（防御字标图内的透明留白，保证字高=字标实际高度）
         scale = target_h / wm.height
         wm = wm.resize((max(1, int(wm.width * scale)), target_h), Image.LANCZOS)
         # 统一着色（保留官方字标字形，照片上更可读）
@@ -1525,6 +1527,14 @@ def apply_wordmark_style(
         return apply_art_style(image, exif_data, custom_text,
                                params_ratio=params_ratio,
                                text_color=text_color, text_shadow=text_shadow)
+
+    # 机型文字用艺术字体，视觉高度与字标一致（参考图版式：品牌与机型同高）
+    font_model = get_art_font(target_h)
+    if model_part:
+        bb_m0 = draw.textbbox((0, 0), model_part, font=font_model)
+        hh = bb_m0[3] - bb_m0[1]
+        if hh > 0:
+            font_model = get_art_font(int(round(target_h * target_h / hh)))
 
     def _draw_with_shadow(text: str, xy: tuple, font):
         """柔和阴影：黑色文字单独层模糊后偏移合成，再画彩色文字"""

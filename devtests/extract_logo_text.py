@@ -66,7 +66,21 @@ def extract_logo_text(path: Path) -> Path:
         # 形态学开运算（先腐蚀后膨胀）：去掉细线状杂质（条纹边缘残留）
         a_img = Image.fromarray(alpha.astype(np.uint8), 'L')
         a_img = a_img.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
-        alpha = np.asarray(a_img)
+        alpha = np.array(a_img)  # 拷贝，保证可写（np.asarray 可能是只读视图）
+    # 连通区域过滤（两个分支通用）：去掉面积过小或高度过矮的组件
+    # （源 logo 上的对角虚线/装饰线足够粗，开运算去不掉，按区域过滤）
+    from scipy import ndimage
+    mask = alpha > 8
+    lab, n = ndimage.label(mask)
+    if n > 1:
+        objects = ndimage.find_objects(lab)
+        areas = ndimage.sum(mask, lab, index=range(1, n + 1))
+        max_area = float(areas.max())
+        max_h = max(sl[0].stop - sl[0].start for sl in objects)
+        for i, sl in enumerate(objects, 1):
+            comp_h = sl[0].stop - sl[0].start
+            if areas[i - 1] < 0.05 * max_area or comp_h < 0.35 * max_h:
+                alpha[lab == i] = 0
     out = np.dstack([arr[:, :, :3], alpha])
 
     # --- 3) 裁剪到内容 ---
