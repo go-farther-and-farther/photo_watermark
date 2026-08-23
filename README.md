@@ -301,7 +301,7 @@ BLUR_CORNER_RADIUS = 0.05              # 圆角半径（相对于图片宽度）
 ```python
 ART_FONT_PATH = ''                     # 品牌大字字体路径（TTF/OTF/TTC），留空=内置 Montserrat Italic
 ART_FONT_RATIO = 0.028                 # 品牌大字高度（相对照片宽度比例），0.020小 0.028默认 0.040大
-ART_PARAMS_RATIO = 0.0135              # 第二行参数字体大小（相对照片宽度比例）
+ART_PARAMS_RATIO = 0.015               # 第二行参数字体大小（相对照片宽度比例）
 ART_TEXT_COLOR = (255, 255, 255)       # 文字颜色
 ART_TEXT_SHADOW = True                 # 柔和阴影（白字在亮背景上推荐开）
 ```
@@ -432,7 +432,7 @@ MIT License
 
 ## 更新日志
 
-- **v1.7.2**：`art` 样式默认字体换为 Montserrat Italic（粗斜几何无衬线，风格接近相机品牌 LOGO 字样）；Playfair Display Italic 保留为可选字体（`assets/fonts/`，两个字体都内嵌 exe）
+- **v1.7.2**：`art` 样式默认字体换为 Montserrat Italic（粗斜几何无衬线，风格接近相机品牌 LOGO 字样）；Playfair Display Italic 保留为可选字体（`assets/fonts/`，两个字体都内嵌 exe）；参数字体默认略加大（0.0135→0.015）
 - **v1.7.1**：新增 `art` 艺术字体样式（品牌艺术字+参数叠加照片底部，无边框）；内置 Playfair Display Italic（SIL OFL，exe 内嵌，可在设置窗口换任意 TTF/OTF 艺术字体）；设置窗口新增「艺术字体」区块（大字/参数字号、颜色、阴影、字体文件），五种样式预览同步更新
 - **v1.6.4**：默认预览照片可配置（`水印设置.ini` → `默认预览照片`，默认 `input/Sony.JPG`）
 - **v1.6.3**：移除窗口强制置顶；照片卡片改虚线拖放热区（消除底部空白）；新增 ⛶ 全屏预览（◀ ▶ 切样式，ESC 关闭）；预览框加大；设置按钮醒目化

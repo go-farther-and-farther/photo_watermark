@@ -251,7 +251,7 @@ BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SH
 # 艺术字体样式（art）：品牌艺术字 + 参数，叠加在照片底部（无边框）
 ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', '')  # 留空=内置 Montserrat Italic
 ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', 0.028, 'float')
-ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.0135, 'float')
+ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.015, 'float')
 ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
 ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', True, 'bool')
 
@@ -2253,7 +2253,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             v_border_text.set(color_to_name(parse_color(gd('颜色设置', '边框文字颜色', '白色'))))
             v_art_path.set(gd('艺术字体', '艺术字体路径', ''))
             v_art_font.set(int(round(gd('艺术字体', '字体大小', 0.028, float) * 1000)))
-            v_art_params.set(int(round(gd('艺术字体', '参数字体大小', 0.0135, float) * 10000)))
+            v_art_params.set(int(round(gd('艺术字体', '参数字体大小', 0.015, float) * 10000)))
             v_art_shadow.set(str(gd('艺术字体', '文字阴影', '是')).lower() in ('是', 'yes', 'true', '1'))
             v_art_color.set(color_to_name(parse_color(gd('艺术字体', '文字颜色', '白色'))))
             refresh_preview()
@@ -2465,8 +2465,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     ttk.Label(f7, text="（0.020=小 0.028=默认 0.040=大）", foreground='#666666').grid(
         row=2, column=0, columnspan=3, sticky='w', pady=(0, 2))
     add_scale(f7, 3, "参数字体大小:", v_art_params, 50, 400, "%.4f", 10000,
-              tip="第二行拍摄参数文字的大小（相对照片宽度的比例）：\n0.0100=小，0.0135=默认，0.0200=大。")
-    ttk.Label(f7, text="（0.0100=小 0.0135=默认 0.0200=大）", foreground='#666666').grid(
+              tip="第二行拍摄参数文字的大小（相对照片宽度的比例）：\n0.0100=小，0.0150=默认，0.0200=大。")
+    ttk.Label(f7, text="（0.0100=小 0.0150=默认 0.0200=大）", foreground='#666666').grid(
         row=4, column=0, columnspan=3, sticky='w', pady=(0, 2))
     ttk.Label(f7, text="文字颜色:").grid(row=5, column=0, sticky='w', pady=5)
     cb_art_color = ttk.Combobox(f7, textvariable=v_art_color,
