@@ -48,7 +48,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.7.0'
+VERSION = 'v1.7.1'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -206,6 +206,8 @@ TEMPLATE_TRANSPARENT = get_config_value('文字模板', '半透明格式', '{相
 TEMPLATE_BORDER = get_config_value('文字模板', '边框格式', '{焦距} {光圈} {快门} {ISO} | {日期}')
 TEMPLATE_BLUR = get_config_value('文字模板', '模糊格式', '{焦距} {光圈} {快门} {ISO}')
 TEMPLATE_BLUR_LINE2 = get_config_value('文字模板', '模糊第二行格式', '{日期}')
+TEMPLATE_ART = get_config_value('文字模板', '艺术格式', '{相机}')
+TEMPLATE_ART_PARAMS = get_config_value('文字模板', '艺术参数格式', '{焦距} {光圈} {快门} {ISO}')
 
 # 字体设置
 FONT_PATH = get_config_value('字体设置', '字体路径', '')
@@ -245,6 +247,13 @@ BLUR_BORDER_RATIO = get_config_value('模糊边框', '边框宽度', BLUR_BORDER
 BLUR_INTENSITY = get_config_value('模糊边框', '模糊强度', BLUR_INTENSITY if 'BLUR_INTENSITY' in dir() else 15, 'int')
 BLUR_CORNER_RADIUS = get_config_value('模糊边框', '圆角大小', BLUR_CORNER_RADIUS if 'BLUR_CORNER_RADIUS' in dir() else 0.03, 'float')
 BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SHADOW if 'BLUR_TEXT_SHADOW' in dir() else True, 'bool')
+
+# 艺术字体样式（art）：品牌艺术字 + 参数，叠加在照片底部（无边框）
+ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', '')  # 留空=内置 Playfair Display Italic
+ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', 0.028, 'float')
+ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.0135, 'float')
+ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
+ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', True, 'bool')
 
 # 智能样式（'auto'=按照片方向自动选样式，'off'=固定用默认样式）
 SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool') else 'off'
@@ -1255,6 +1264,142 @@ def apply_blur_border(
     return new_image
 
 
+# ========== 艺术字体样式（art） ==========
+
+# 内置艺术字体（SIL OFL 许可，可再分发；exe 内嵌，exe 旁同名文件优先）
+ART_BUNDLED_FONT = 'assets/fonts/PlayfairDisplay-Italic.ttf'
+_art_font_cache = {}
+
+
+def get_art_font(size: int, weight: float = 700.0):
+    """
+    获取艺术字体（品牌大字用）：
+    1. 配置「艺术字体路径」指定的 TTF/OTF（绝对路径或相对程序目录）
+    2. 否则用内置 Playfair Display Italic（exe 内嵌）
+    3. 都失败时兜底用普通字体（get_font）
+    可变字体会尝试加粗（wght 轴 = weight）。
+    """
+    size = int(max(10, size))
+    candidates = []
+    if ART_FONT_PATH:
+        p = Path(ART_FONT_PATH)
+        candidates.append(str(p if p.is_absolute() else get_base_dir() / p))
+    candidates.append(resource_path(ART_BUNDLED_FONT))
+    key = (size, weight, tuple(candidates))
+    if key in _art_font_cache:
+        return _art_font_cache[key]
+
+    font = None
+    for fp in candidates:
+        if fp and Path(fp).exists():
+            try:
+                f = ImageFont.truetype(fp, size)
+                try:
+                    f.set_variation_by_axes([weight])  # 可变字体加粗
+                except Exception:
+                    pass
+                font = f
+                break
+            except Exception:
+                continue
+    if font is None:
+        font = get_font(size)  # 兜底：普通字体
+    _art_font_cache[key] = font
+    return font
+
+
+def apply_art_style(
+    image: Image.Image,
+    exif_data: Dict[str, str],
+    custom_text: str = '',
+    font_ratio: float = 0.0,
+    params_ratio: float = 0.0,
+    text_color: Tuple[int, int, int] = None,
+    text_shadow: bool = None,
+) -> Image.Image:
+    """
+    应用艺术字体样式（art）
+    无边框：照片底部中央叠品牌艺术字（第一行，艺术字体加粗）
+    + 拍摄参数（第二行，普通字体）+ 自定义文字（第三行，可选），带柔和阴影
+
+    Args:
+        image: 原始图片
+        exif_data: EXIF数据
+        custom_text: 自定义文字（第三行，可选）
+        font_ratio: 第一行字体大小（相对图片宽度，0=用全局 ART_FONT_RATIO）
+        params_ratio: 第二行字体大小（0=用全局 ART_PARAMS_RATIO）
+        text_color: 文字颜色（None=用全局 ART_TEXT_COLOR）
+        text_shadow: 是否柔和阴影（None=用全局 ART_TEXT_SHADOW）
+
+    Returns:
+        处理后的图片（尺寸不变）
+    """
+    if font_ratio <= 0:
+        font_ratio = ART_FONT_RATIO
+    if params_ratio <= 0:
+        params_ratio = ART_PARAMS_RATIO
+    if text_color is None:
+        text_color = ART_TEXT_COLOR
+    if text_shadow is None:
+        text_shadow = ART_TEXT_SHADOW
+
+    # 第一行：品牌+相机（模板 {相机}，兜底 品牌 → 自定义文字）
+    line1_text = format_template(TEMPLATE_ART, exif_data)
+    if not line1_text:
+        line1_text = exif_data.get('brand') or ''
+    if not line1_text:
+        line1_text = DEFAULT_TEXT or ''
+    # 第二行：拍摄参数
+    line2_text = format_template(TEMPLATE_ART_PARAMS, exif_data)
+
+    if not line1_text and not line2_text and not custom_text:
+        return image
+
+    from PIL import ImageFilter  # 阴影模糊用
+
+    width, height = image.size
+    img = image.convert('RGBA')
+    draw = ImageDraw.Draw(img)
+
+    font1 = get_art_font(max(16, int(width * font_ratio)))
+    font2 = get_font(max(12, int(width * params_ratio)))
+
+    def _draw_with_shadow(text: str, xy: tuple, font):
+        """柔和阴影：黑色文字单独层模糊后偏移合成，再画彩色文字"""
+        fs = getattr(font, 'size', None) or 20
+        if text_shadow:
+            sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(sh).text(xy, text, font=font, fill=(0, 0, 0, 200))
+            sh = sh.filter(ImageFilter.GaussianBlur(radius=max(1.5, fs * 0.03)))
+            off = max(1, fs // 25)
+            img.alpha_composite(sh, (off, off))
+        ImageDraw.Draw(img).text(xy, text, font=font, fill=tuple(text_color) + (255,))
+
+    # 布局：底部中央（参考图版式：品牌大字在上，参数小字在下）
+    gap = max(4, int(width * 0.006))
+    b1 = draw.textbbox((0, 0), line1_text, font=font1) if line1_text else (0, 0, 0, 0)
+    b2 = draw.textbbox((0, 0), line2_text, font=font2) if line2_text else (0, 0, 0, 0)
+    b3 = draw.textbbox((0, 0), custom_text, font=font2) if custom_text else (0, 0, 0, 0)
+    h1, h2, h3 = b1[3] - b1[1], b2[3] - b2[1], b3[3] - b3[1]
+    block_h = h1 + (gap + h2 if line2_text else 0) + (gap + h3 if custom_text else 0)
+    bottom_margin = int(height * 0.045)
+
+    y_cur = height - bottom_margin - block_h
+    if line1_text:
+        x1 = (width - (b1[2] - b1[0])) // 2 - b1[0]
+        _draw_with_shadow(line1_text, (x1, y_cur - b1[1]), font1)
+        y_cur += h1 + gap
+    if line2_text:
+        x2 = (width - (b2[2] - b2[0])) // 2 - b2[0]
+        _draw_with_shadow(line2_text, (x2, y_cur - b2[1]), font2)
+        y_cur += h2 + gap
+    if custom_text:
+        x3 = (width - (b3[2] - b3[0])) // 2 - b3[0]
+        _draw_with_shadow(custom_text, (x3, y_cur - b3[1]), font2)
+
+    return img.convert('RGB')
+
+
 def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs):
     """
     应用单个水印样式
@@ -1310,6 +1455,14 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             blur_intensity=kwargs.get('blur_intensity', 0),
             text_color=kwargs.get('text_color', None),
             text_shadow=kwargs.get('text_shadow', True),
+        )
+    elif style == 'art':
+        return apply_art_style(
+            image, exif_data, custom_text,
+            font_ratio=kwargs.get('font_ratio', 0.0),
+            params_ratio=kwargs.get('params_ratio', 0.0),
+            text_color=kwargs.get('text_color', None),
+            text_shadow=kwargs.get('text_shadow', None),
         )
     else:
         print(f"  [警告] 未知样式: {style}")
@@ -1634,7 +1787,8 @@ def refresh_globals_from_ini():
     global _ini_config, DEFAULT_STYLE, DEFAULT_TEXT, JPEG_QUALITY, JPEG_SUBSAMPLING, AUTO_OPEN_OUTPUT, \
         SHOW_CONSOLE_WINDOW, BORDER_BACKGROUND_IMAGE, BORDER_BACKGROUND_OPACITY, \
         TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
-        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO
+        BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO, \
+        ART_FONT_PATH, ART_FONT_RATIO, ART_PARAMS_RATIO, ART_TEXT_COLOR, ART_TEXT_SHADOW
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
@@ -1653,6 +1807,12 @@ def refresh_globals_from_ini():
     BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
     BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
     LOGO_HEIGHT_RATIO = get_config_value('白条边框', 'Logo高度', LOGO_HEIGHT_RATIO, 'float')
+    ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', ART_FONT_PATH)
+    ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', ART_FONT_RATIO, 'float')
+    ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', ART_PARAMS_RATIO, 'float')
+    ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
+    ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', ART_TEXT_SHADOW, 'bool')
+    _art_font_cache.clear()  # 字体可能变了，清缓存
 
 
 # ========== 预览功能 ==========
@@ -1663,6 +1823,8 @@ PREVIEW_OVERRIDABLE = (
     'TRANSPARENT_OPACITY', 'TRANSPARENT_FONT_RATIO', 'TRANSPARENT_POSITION',
     'BORDER_BACKGROUND_IMAGE', 'BORDER_BACKGROUND_OPACITY',
     'BORDER_FRAME_COLOR', 'BORDER_TEXT_COLOR', 'COLOR_BORDER', 'SMART_STYLE',
+    'ART_FONT_PATH', 'ART_FONT_RATIO', 'ART_PARAMS_RATIO',
+    'ART_TEXT_COLOR', 'ART_TEXT_SHADOW',
 )
 
 # 预览渲染互斥锁：防止后台线程并发改全局配置导致渲染错乱
@@ -1876,6 +2038,11 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     v_auto = tk.BooleanVar(value=bool(AUTO_OPEN_OUTPUT))
     v_console = tk.BooleanVar(value=bool(SHOW_CONSOLE_WINDOW))
     v_smart = tk.BooleanVar(value=(SMART_STYLE == 'auto'))
+    v_art_font = tk.IntVar(value=int(ART_FONT_RATIO * 1000))          # 千分比
+    v_art_params = tk.IntVar(value=int(ART_PARAMS_RATIO * 10000))     # 万分比
+    v_art_shadow = tk.BooleanVar(value=bool(ART_TEXT_SHADOW))
+    v_art_color = tk.StringVar(value=color_to_name(ART_TEXT_COLOR))
+    v_art_path = tk.StringVar(value=ART_FONT_PATH)
 
     # ===== 实时预览（嵌入设置窗口右侧） =====
     # 默认预览样式：主窗口勾选的第一个，否则用全局默认样式
@@ -1901,6 +2068,11 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             'BORDER_FRAME_COLOR': parse_color(v_border_color.get()),
             'BORDER_TEXT_COLOR': parse_color(v_border_text.get()),
             'SMART_STYLE': 'auto' if v_smart.get() else 'off',
+            'ART_FONT_PATH': v_art_path.get(),
+            'ART_FONT_RATIO': v_art_font.get() / 1000.0,
+            'ART_PARAMS_RATIO': v_art_params.get() / 10000.0,
+            'ART_TEXT_COLOR': parse_color(v_art_color.get()),
+            'ART_TEXT_SHADOW': v_art_shadow.get(),
         }
 
     def refresh_preview():
@@ -2024,6 +2196,15 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
         if path:
             v_bg.set(path)
 
+    def browse_art_font():
+        path = filedialog.askopenfilename(
+            title="选择艺术字体文件",
+            filetypes=[("字体文件", "*.ttf *.otf *.ttc"), ("所有文件", "*.*")],
+            parent=win,
+        )
+        if path:
+            v_art_path.set(path)
+
     def on_restore_defaults():
         """把所有设置重置为默认值（读 水印设置.ini 默认配置），预览立即更新"""
         from tkinter import messagebox
@@ -2069,6 +2250,11 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             v_font.set(int(round(gd('半透明水印', '字体大小', 0.02, float) * 1000)))
             v_border_color.set(color_to_name(parse_color(gd('颜色设置', '边框颜色', '黑色'))))
             v_border_text.set(color_to_name(parse_color(gd('颜色设置', '边框文字颜色', '白色'))))
+            v_art_path.set(gd('艺术字体', '艺术字体路径', ''))
+            v_art_font.set(int(round(gd('艺术字体', '字体大小', 0.028, float) * 1000)))
+            v_art_params.set(int(round(gd('艺术字体', '参数字体大小', 0.0135, float) * 10000)))
+            v_art_shadow.set(str(gd('艺术字体', '文字阴影', '是')).lower() in ('是', 'yes', 'true', '1'))
+            v_art_color.set(color_to_name(parse_color(gd('艺术字体', '文字颜色', '白色'))))
             refresh_preview()
         except Exception as e:
             messagebox.showerror("恢复默认失败", f"恢复默认时出错：\n{e}", parent=win)
@@ -2093,6 +2279,11 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             ('半透明水印', '字体大小', fmt_float(v_font.get() / 1000)),
             ('颜色设置', '边框颜色', v_border_color.get()),
             ('颜色设置', '边框文字颜色', v_border_text.get()),
+            ('艺术字体', '艺术字体路径', v_art_path.get()),
+            ('艺术字体', '字体大小', fmt_float(v_art_font.get() / 1000)),
+            ('艺术字体', '参数字体大小', fmt_float(v_art_params.get() / 10000)),
+            ('艺术字体', '文字颜色', v_art_color.get()),
+            ('艺术字体', '文字阴影', '是' if v_art_shadow.get() else '否'),
         ]
         failures = []
         for sec, key, val in save_items:
@@ -2156,7 +2347,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
                             values=[_style_name[k] for k, _, _ in STYLE_OPTIONS],
                             state='readonly', width=22)
     cb_style.grid(row=1, column=1, columnspan=2, sticky='ew', pady=5)
-    ToolTip(cb_style, "默认使用的水印样式：\n白底条形 = 照片下方参数条（尼康/佳能风格）\n半透明 = 文字直接叠加在照片上\n纯色边框 = 边框包裹照片，底部显示参数\n模糊边框 = 边缘模糊背景，效果自然")
+    ToolTip(cb_style, "默认使用的水印样式：\n白底条形 = 照片下方参数条（尼康/佳能风格）\n半透明 = 文字直接叠加在照片上\n纯色边框 = 边框包裹照片，底部显示参数\n模糊边框 = 边缘模糊背景，效果自然\n艺术字体 = 品牌艺术字+参数叠加照片底部")
     cb_smart = ttk.Checkbutton(g1, text="智能样式（按照片方向自动选）", variable=v_smart)
     cb_smart.grid(row=2, column=0, columnspan=3, sticky='w', pady=5)
     ToolTip(cb_smart, "根据照片方向自动选择样式：\n横版 = 白条边框，竖版 = 模糊边框，方形 = 半透明。\n竖版照片用白条会过粗，推荐开启。")
@@ -2245,7 +2436,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
 
     # 纯色边框
     f6 = ttk.LabelFrame(tab_s, text="纯色边框（border）", padding=10)
-    f6.pack(fill='x')
+    f6.pack(fill='x', pady=(0, 8))
     f6.columnconfigure(1, weight=1)
     ttk.Label(f6, text="边框颜色:").grid(row=0, column=0, sticky='w', pady=5)
     cb_bc = ttk.Combobox(f6, textvariable=v_border_color, values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
@@ -2258,8 +2449,35 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     cb_bt.grid(row=1, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_bt, "纯色边框样式里参数文字的颜色。")
 
+    # 艺术字体
+    f7 = ttk.LabelFrame(tab_s, text="艺术字体（art）", padding=10)
+    f7.pack(fill='x')
+    f7.columnconfigure(1, weight=1)
+    ttk.Label(f7, text="品牌大字:").grid(row=0, column=0, sticky='w', pady=5)
+    e_art_path = ttk.Entry(f7, textvariable=v_art_path, width=26)
+    e_art_path.grid(row=0, column=1, sticky='ew', pady=5)
+    ToolTip(e_art_path, "品牌大字（第一行）用的艺术字体文件（TTF/OTF）。\n留空 = 内置 Playfair Display Italic（意大利体风格，SIL OFL 许可）。\n也可以填自己下载的任意艺术字体路径。")
+    b_art_font = ttk.Button(f7, text="浏览...", command=browse_art_font)
+    b_art_font.grid(row=0, column=2, padx=(4, 0), pady=5)
+    add_scale(f7, 1, "大字大小:", v_art_font, 10, 60, "%.3f", 1000,
+              tip="品牌大字的高度（相对照片宽度的比例）：\n0.020=小，0.028=默认，0.040=大。")
+    ttk.Label(f7, text="（0.020=小 0.028=默认 0.040=大）", foreground='#666666').grid(
+        row=2, column=0, columnspan=3, sticky='w', pady=(0, 2))
+    add_scale(f7, 3, "参数字体大小:", v_art_params, 50, 400, "%.4f", 10000,
+              tip="第二行拍摄参数文字的大小（相对照片宽度的比例）：\n0.0100=小，0.0135=默认，0.0200=大。")
+    ttk.Label(f7, text="（0.0100=小 0.0135=默认 0.0200=大）", foreground='#666666').grid(
+        row=4, column=0, columnspan=3, sticky='w', pady=(0, 2))
+    ttk.Label(f7, text="文字颜色:").grid(row=5, column=0, sticky='w', pady=5)
+    cb_art_color = ttk.Combobox(f7, textvariable=v_art_color,
+                                values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
+                                state='readonly', width=18)
+    cb_art_color.grid(row=5, column=1, sticky='ew', pady=5)
+    ToolTip(cb_art_color, "艺术字体样式里文字的颜色（默认白色）。")
+    cb_art_shadow = ttk.Checkbutton(f7, text="柔和阴影（推荐开，白字更清晰）", variable=v_art_shadow)
+    cb_art_shadow.grid(row=6, column=0, columnspan=3, sticky='w', pady=5)
+
     # ===== 右侧：实时预览（2x2 网格，四种样式同步更新） =====
-    f5 = ttk.LabelFrame(outer, text=" 实时预览（四种样式同步更新） ", padding=8)
+    f5 = ttk.LabelFrame(outer, text=" 实时预览（五种样式同步更新） ", padding=8)
     f5.grid(row=0, column=1, sticky='ns')
     pv_cells = {}     # style -> (canvas, caption_label)
     pv_img_ids = {}   # style -> canvas item id
@@ -2276,7 +2494,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
         pv_img_ids[key] = _cv.create_image(102, 70, image='')
-    ttk.Label(f5, text="调整滑杆、颜色、位置或签名，\n四种样式会同步更新（保存后生效）",
+    ttk.Label(f5, text="调整滑杆、颜色、位置或签名，\n五种样式会同步更新（保存后生效）",
               foreground='#666666').pack(anchor='w', pady=(6, 0))
 
     # ===== 底部按钮 =====
@@ -2300,7 +2518,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     if preview_state['photo']:
         refresh_preview()  # 首次渲染
         for _var in (v_text, v_bg, v_bg_alpha, v_strip_h, v_logo_h,
-                     v_pos, v_alpha, v_font, v_border_color, v_border_text, v_brand, v_smart):
+                     v_pos, v_alpha, v_font, v_border_color, v_border_text, v_brand, v_smart,
+                     v_art_font, v_art_params, v_art_shadow, v_art_color, v_art_path):
             try:
                 _var.trace_add('write', lambda *a: refresh_preview())
             except Exception:
@@ -2317,6 +2536,7 @@ STYLE_OPTIONS = [
     ('transparent', '半透明', '文字直接叠加在照片上'),
     ('border', '纯色边框', '边框包裹照片，底部显示参数'),
     ('blur', '模糊边框', '边缘模糊背景，效果自然'),
+    ('art', '艺术字体', '品牌艺术字+参数，叠加照片底部'),
 ]
 
 # 品牌选项（显示名, 配置值）；空值=自动识别EXIF品牌
@@ -3315,7 +3535,7 @@ def main():
             sys.exit(0)
 
     # 验证样式参数
-    valid_styles = {'strip', 'transparent', 'border', 'blur'}
+    valid_styles = {'strip', 'transparent', 'border', 'blur', 'art'}
     for s in args.style.split(','):
         if s.strip() not in valid_styles:
             print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")

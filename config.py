@@ -8,6 +8,7 @@
 # transparent - 半透明文字水印，直接叠加在照片上，可选位置（左上/右上/左下/右下）
 # border      - 纯色边框包裹照片，底部显示拍摄参数，黑色边框经典，透明边框也不错
 # blur        - 模糊边框，取图片边缘做高斯模糊作为边框，效果自然好看
+# art         - 艺术字体，品牌艺术字+参数叠加照片底部（无边框，内置 Playfair Display Italic）
 DEFAULT_STYLE = 'strip'
 
 # 智能样式选择（根据照片方向自动选择）
@@ -136,6 +137,24 @@ BLUR_CORNER_RADIUS = 0.03
 BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8  # 底部边框宽度倍数
 BLUR_BRIGHTNESS_FACTOR = 0.85       # 亮度降低因子（0.8-0.95）
 BLUR_DOWNSAMPLE_FACTOR = 4          # 缩小倍数（越大越快，但质量略降）
+
+# ==================== art 样式（艺术字体） ====================
+
+# 品牌大字字体路径（TTF/OTF/TTC）；留空 = 内置 Playfair Display Italic
+# （assets/fonts/，SIL OFL 许可，exe 已内嵌）
+ART_FONT_PATH = ''
+
+# 品牌大字大小（相对照片宽度比例，0.020小 0.028默认 0.040大）
+ART_FONT_RATIO = 0.028
+
+# 第二行参数字体大小（相对照片宽度比例，0.0100小 0.0135默认 0.0200大）
+ART_PARAMS_RATIO = 0.0135
+
+# 文字颜色 (R, G, B)
+ART_TEXT_COLOR = (255, 255, 255)    # 白色
+
+# 柔和阴影（白字在亮背景上推荐开）
+ART_TEXT_SHADOW = True
 
 # ==================== 输出设置 ====================
 

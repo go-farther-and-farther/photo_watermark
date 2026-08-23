@@ -5,9 +5,11 @@ a = Analysis(
     ['photo_watermark.py'],
     pathex=[],
     binaries=[],
-    # 内嵌品牌Logo、默认配置与演示照片：单独发 exe 也能用（exe 旁有同名文件时优先用外面的，可自定义）
+    # 内嵌品牌Logo、默认配置、演示照片与艺术字体：单独发 exe 也能用（exe 旁有同名文件时优先用外面的，可自定义）
     # 完整版：内置整个 ExifTool 便携目录（ExifTool.exe 启动器 + exiftool_files 引擎），EXIF 查看全格式可靠解析
+    # Playfair Display Italic：SIL OFL 许可，可再分发（艺术字体样式默认用）
     datas=[('logos', 'logos'), ('水印设置.ini', '.'), ('input/demo_photo.jpg', 'input'),
+           ('assets/fonts/PlayfairDisplay-Italic.ttf', 'assets/fonts'),
            ('C:\\Users\\LQL\\AppData\\Local\\Programs\\ExifTool', 'exiftool')],
     hiddenimports=[],
     hookspath=[],

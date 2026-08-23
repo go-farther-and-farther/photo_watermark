@@ -20,11 +20,12 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **四种水印样式**
+- **五种水印样式**
   - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
   - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
+  - `art` — 艺术字体（品牌艺术字+拍摄参数叠加照片底部，无边框；默认内置 Playfair Display Italic 意大利体，可换成任意 TTF/OTF 艺术字体）
 
 - **自定义边框背景图**
   - 可自由选择一张图片作为水印边框的背景（strip/纯色边框样式生效）
@@ -32,7 +33,7 @@
 
 - **图形化设置窗口（分两个选项卡）**
   - **总设置**：签名、默认样式、品牌Logo、边框背景图、JPEG质量/采样、输出选项、智能样式等全局设置，按用途分为「水印文字与样式 / 边框外观 / 输出设置 / 其他」四组
-  - **样式设置**：半透明水印、白条边框、纯色边框各自的参数单独调整
+  - **样式设置**：半透明水印、白条边框、纯色边框、艺术字体各自的参数单独调整
   - 选择窗口点「设置」打开，保存后立即生效；支持**一键恢复默认**（标题栏右侧「恢复默认」链接）
   - 设置保存在 `水印设置.ini` 中，无需手动编辑文件
 
@@ -40,7 +41,7 @@
   - **选择窗口右侧**实时预览：**全部视图**（2×2 缩略图网格同时显示全部勾选样式）和**单个视图**（单个大图）两种模式；**只勾选一种样式时自动切换为单个大图**
   - 勾选/取消样式、改品牌Logo、换照片即时刷新；未选照片时用配置的示例照片（`水印设置.ini` → `默认预览照片`，默认 `input/Sony.JPG`）展示效果
   - **⛶ 全屏预览**：点预览区右上角「全屏」，全屏大图查看水印效果，◀ ▶ 切换样式，ESC 关闭
-  - **设置窗口右侧内嵌 2×2 四格预览**：四种样式同步更新 —— 拖动滑杆（边框高度/Logo大小/透明度/字体/背景图…）、改颜色/位置/品牌/签名，四个效果同时刷新
+  - **设置窗口右侧内嵌网格预览**：五种样式同步更新 —— 拖动滑杆（边框高度/Logo大小/透明度/字体/背景图…）、改颜色/位置/品牌/签名，各效果同时刷新
   - **滑杆数值可直接输入**：想填多少填多少，不受滑杆范围限制，输入即实时生效
   - **照片卡片自带拖放热区**：虚线框提示，把照片/文件夹拖进来即可
 
@@ -154,6 +155,9 @@ photo_watermark.exe input.jpg --style border --border-color black
 
 # 模糊边框（推荐，效果自然）
 photo_watermark.exe input.jpg --style blur
+
+# 艺术字体（品牌艺术字+参数，叠加照片底部）
+photo_watermark.exe input.jpg --style art
 ```
 
 ### 自定义文字
@@ -172,7 +176,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 |------|------|--------|
 | `input` | 输入图片或文件夹路径 | 留空则弹出窗口选择（`水印设置.ini` 可设置默认路径） |
 | `-o, --output` | 输出路径 | `config.py` 配置（留空则自动命名） |
-| `-s, --style` | 边框样式：`strip` / `transparent` / `border` / `blur` | `config.py` 配置 |
+| `-s, --style` | 水印样式：`strip` / `transparent` / `border` / `blur` / `art` | `config.py` 配置 |
 | `-t, --text` | 自定义水印文字 | 无 |
 | `-p, --position` | 半透明水印位置：`top-left` / `top-right` / `bottom-left` / `bottom-right` | `config.py` 配置 |
 | `--border-color` | 边框颜色（`black`/`white`/`gray` 或 RGB 如 `255,255,255`） | `config.py` 配置 |
@@ -292,7 +296,21 @@ BLUR_TEXT_SHADOW = True                 # 是否添加文字阴影
 BLUR_CORNER_RADIUS = 0.05              # 圆角半径（相对于图片宽度），0 无圆角
 ```
 
-**注意：exe用户需要将 `config.py`、`水印设置.ini` 和 `logos/` 文件夹放在exe同目录下。**
+### art 样式配置（艺术字体）
+
+```python
+ART_FONT_PATH = ''                     # 品牌大字字体路径（TTF/OTF/TTC），留空=内置 Playfair Display Italic
+ART_FONT_RATIO = 0.028                 # 品牌大字高度（相对照片宽度比例），0.020小 0.028默认 0.040大
+ART_PARAMS_RATIO = 0.0135              # 第二行参数字体大小（相对照片宽度比例）
+ART_TEXT_COLOR = (255, 255, 255)       # 文字颜色
+ART_TEXT_SHADOW = True                 # 柔和阴影（白字在亮背景上推荐开）
+```
+
+> 字体说明：内置 Playfair Display Italic（Google Fonts，SIL OFL 许可，可再分发，exe 已内嵌）。
+> 想换字体：把任意 TTF/OTF 放到 `assets/fonts/` 或任意位置，在设置窗口「艺术字体」里选路径（或改 `水印设置.ini` → `[艺术字体]` → `艺术字体路径`）。
+> 文字内容走 `文字模板` 段：`艺术格式`（第一行，默认 `{相机}`）和 `艺术参数格式`（第二行，默认 `{焦距} {光圈} {快门} {ISO}`）。
+
+**注意：exe用户需要将 `config.py`、`水印设置.ini`、`assets/fonts/` 和 `logos/` 文件夹放在exe同目录下（exe 内已内嵌默认字体和Logo，不带也能用）。**
 
 ## 效果预览
 
@@ -345,6 +363,18 @@ BLUR_CORNER_RADIUS = 0.05              # 圆角半径（相对于图片宽度）
 └──────────────────────────────────────┘
 ```
 
+### art 样式（艺术字体，无边框）
+
+```
+┌──────────────────────────────────────┐
+│                                      │
+│           原始照片区域                │
+│                                      │
+│          NIKON Z 7        ← 艺术字体 │
+│       120mm F5.6 1/200 ISO64         │
+└──────────────────────────────────────┘
+```
+
 ## 项目结构
 
 ```
@@ -361,6 +391,7 @@ photo_watermark/
 │   ├── olympus_logo.jpeg
 │   ├── pentax_logo.jpeg
 │   └── panasonic_logo.jpeg
+├── assets/fonts/           # 艺术字体（内置 PlayfairDisplay-Italic.ttf，SIL OFL）
 ├── pkg/                   # 打包配置（开发者用）
 │   ├── setup.py
 │   └── pyproject.toml
@@ -381,6 +412,8 @@ photo_watermark/
 
 MIT License
 
+内置字体 **Playfair Display**（Google Fonts）采用 **SIL Open Font License 1.1**，允许随软件再分发（艺术字体样式默认用）。
+
 ## 开发者文档
 
 如需参与开发或了解项目内部实现，请参考 [TECHNICAL.md](TECHNICAL.md)，包含：
@@ -398,6 +431,7 @@ MIT License
 
 ## 更新日志
 
+- **v1.7.1**：新增 `art` 艺术字体样式（品牌艺术字+参数叠加照片底部，无边框）；内置 Playfair Display Italic（SIL OFL，exe 内嵌，可在设置窗口换任意 TTF/OTF 艺术字体）；设置窗口新增「艺术字体」区块（大字/参数字号、颜色、阴影、字体文件），五种样式预览同步更新
 - **v1.6.4**：默认预览照片可配置（`水印设置.ini` → `默认预览照片`，默认 `input/Sony.JPG`）
 - **v1.6.3**：移除窗口强制置顶；照片卡片改虚线拖放热区（消除底部空白）；新增 ⛶ 全屏预览（◀ ▶ 切样式，ESC 关闭）；预览框加大；设置按钮醒目化
 - **v1.6.2**：只勾选一种样式时自动切换单个大图视图；辅助文字对比度优化
