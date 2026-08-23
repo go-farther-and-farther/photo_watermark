@@ -9,6 +9,7 @@ a = Analysis(
     # 完整版：内置整个 ExifTool 便携目录（ExifTool.exe 启动器 + exiftool_files 引擎），EXIF 查看全格式可靠解析
     # Playfair Display Italic：SIL OFL 许可，可再分发（艺术字体样式默认用）
     datas=[('logos', 'logos'), ('水印设置.ini', '.'), ('input/demo_photo.jpg', 'input'),
+            ('assets/wordmarks', 'assets/wordmarks'),
            ('assets/fonts', 'assets/fonts'),
            ('C:\\Users\\LQL\\AppData\\Local\\Programs\\ExifTool', 'exiftool')],
     hiddenimports=[],

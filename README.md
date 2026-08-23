@@ -376,6 +376,11 @@ ART_TEXT_SHADOW = True                 # 柔和阴影（白字在亮背景上推
 └──────────────────────────────────────┘
 ```
 
+> 默认启用**官方LOGO字标**（设置→艺术字体→「使用官方LOGO字标」）：
+> 第一行优先渲染品牌官方字标图（内置 16 品牌透明字标，`assets/wordmarks/`，
+> 统一着色为文字颜色+柔和阴影），机型跟在字标后，如 `Nikon Z7 2`；
+> 未匹配到品牌LOGO时自动回退为艺术字体文字。
+
 ## 项目结构
 
 ```
@@ -393,6 +398,7 @@ photo_watermark/
 │   ├── pentax_logo.jpeg
 │   └── panasonic_logo.jpeg
 ├── assets/fonts/           # 艺术字体（内置 Montserrat-Italic.ttf、PlayfairDisplay-Italic.ttf，均 SIL OFL）
+├── assets/wordmarks/       # 官方LOGO字标（16品牌透明PNG，art 样式第一行优先用）
 ├── pkg/                   # 打包配置（开发者用）
 │   ├── setup.py
 │   └── pyproject.toml
@@ -432,6 +438,7 @@ MIT License
 
 ## 更新日志
 
+- **v1.7.3**：`art` 样式第一行优先使用**品牌官方LOGO字标**（内置 16 个品牌的透明字标图：Nikon/Canon/Sony/Fuji/Hasselblad/Olympus/Panasonic/Pentax/Ricoh/Leica/Xiaomi/Huawei/Apple/DJI/Vivo/OPPO，统一着色为文字颜色+柔和阴影，机型跟在字标后，如 "Nikon Z7 2"）；未匹配品牌时自动回退艺术字体；设置窗口新增「使用官方LOGO字标」勾选框（可切回纯艺术字）；EXIF 机型规范化（`Z7_2` → `Z7 2`）；输出文件已存在时自动 `_2`、`_3` 唯一命名
 - **v1.7.2**：`art` 样式默认字体换为 Montserrat Italic（粗斜几何无衬线，风格接近相机品牌 LOGO 字样）；Playfair Display Italic 保留为可选字体（`assets/fonts/`，两个字体都内嵌 exe）；参数字体默认略加大（0.0135→0.015）
 - **v1.7.1**：新增 `art` 艺术字体样式（品牌艺术字+参数叠加照片底部，无边框）；内置 Playfair Display Italic（SIL OFL，exe 内嵌，可在设置窗口换任意 TTF/OTF 艺术字体）；设置窗口新增「艺术字体」区块（大字/参数字号、颜色、阴影、字体文件），五种样式预览同步更新
 - **v1.6.4**：默认预览照片可配置（`水印设置.ini` → `默认预览照片`，默认 `input/Sony.JPG`）

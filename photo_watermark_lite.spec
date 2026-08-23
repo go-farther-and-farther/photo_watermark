@@ -9,7 +9,8 @@ a = Analysis(
     # 内嵌品牌Logo、默认配置、演示照片与艺术字体：单独发 exe 也能用（exe 旁有同名文件时优先用外面的，可自定义）
     # Playfair Display Italic：SIL OFL 许可，可再分发（艺术字体样式默认用）
     datas=[('logos', 'logos'), ('水印设置.ini', '.'), ('input/demo_photo.jpg', 'input'),
-           ('assets/fonts', 'assets/fonts')],
+           ('assets/fonts', 'assets/fonts'),
+            ('assets/wordmarks', 'assets/wordmarks')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

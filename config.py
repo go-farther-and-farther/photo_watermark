@@ -156,6 +156,9 @@ ART_TEXT_COLOR = (255, 255, 255)    # 白色
 # 柔和阴影（白字在亮背景上推荐开）
 ART_TEXT_SHADOW = True
 
+# 使用官方LOGO字标（True=品牌匹配时优先用字标图，False=纯艺术字体）
+ART_USE_WORDMARK = True
+
 # ==================== 输出设置 ====================
 
 # 输出文件命名格式（支持变量：{name}, {style}）
