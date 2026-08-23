@@ -8,7 +8,7 @@
 # transparent - 半透明文字水印，直接叠加在照片上，可选位置（左上/右上/左下/右下）
 # border      - 纯色边框包裹照片，底部显示拍摄参数，黑色边框经典，透明边框也不错
 # blur        - 模糊边框，取图片边缘做高斯模糊作为边框，效果自然好看
-# art         - 艺术字体，品牌艺术字+参数叠加照片底部（无边框，内置 Playfair Display Italic）
+# art         - 艺术字体，品牌艺术字+参数叠加照片底部（无边框，内置 Montserrat Italic 粗斜体）
 DEFAULT_STYLE = 'strip'
 
 # 智能样式选择（根据照片方向自动选择）
@@ -140,7 +140,7 @@ BLUR_DOWNSAMPLE_FACTOR = 4          # 缩小倍数（越大越快，但质量略
 
 # ==================== art 样式（艺术字体） ====================
 
-# 品牌大字字体路径（TTF/OTF/TTC）；留空 = 内置 Playfair Display Italic
+# 品牌大字字体路径（TTF/OTF/TTC）；留空 = 内置 Montserrat Italic
 # （assets/fonts/，SIL OFL 许可，exe 已内嵌）
 ART_FONT_PATH = ''
 

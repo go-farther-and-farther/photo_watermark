@@ -48,7 +48,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.7.1'
+VERSION = 'v1.7.2'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -249,7 +249,7 @@ BLUR_CORNER_RADIUS = get_config_value('模糊边框', '圆角大小', BLUR_CORNE
 BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SHADOW if 'BLUR_TEXT_SHADOW' in dir() else True, 'bool')
 
 # 艺术字体样式（art）：品牌艺术字 + 参数，叠加在照片底部（无边框）
-ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', '')  # 留空=内置 Playfair Display Italic
+ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', '')  # 留空=内置 Montserrat Italic
 ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', 0.028, 'float')
 ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.0135, 'float')
 ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
@@ -1267,7 +1267,8 @@ def apply_blur_border(
 # ========== 艺术字体样式（art） ==========
 
 # 内置艺术字体（SIL OFL 许可，可再分发；exe 内嵌，exe 旁同名文件优先）
-ART_BUNDLED_FONT = 'assets/fonts/PlayfairDisplay-Italic.ttf'
+# Montserrat Italic（粗斜几何无衬线，风格接近相机品牌 LOGO 字样）
+ART_BUNDLED_FONT = 'assets/fonts/Montserrat-Italic.ttf'
 _art_font_cache = {}
 
 
@@ -1275,7 +1276,7 @@ def get_art_font(size: int, weight: float = 700.0):
     """
     获取艺术字体（品牌大字用）：
     1. 配置「艺术字体路径」指定的 TTF/OTF（绝对路径或相对程序目录）
-    2. 否则用内置 Playfair Display Italic（exe 内嵌）
+    2. 否则用内置 Montserrat Italic（exe 内嵌，粗斜体，风格接近品牌 LOGO）
     3. 都失败时兜底用普通字体（get_font）
     可变字体会尝试加粗（wght 轴 = weight）。
     """
@@ -2456,7 +2457,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     ttk.Label(f7, text="品牌大字:").grid(row=0, column=0, sticky='w', pady=5)
     e_art_path = ttk.Entry(f7, textvariable=v_art_path, width=26)
     e_art_path.grid(row=0, column=1, sticky='ew', pady=5)
-    ToolTip(e_art_path, "品牌大字（第一行）用的艺术字体文件（TTF/OTF）。\n留空 = 内置 Playfair Display Italic（意大利体风格，SIL OFL 许可）。\n也可以填自己下载的任意艺术字体路径。")
+    ToolTip(e_art_path, "品牌大字（第一行）用的艺术字体文件（TTF/OTF）。\n留空 = 内置 Montserrat Italic（粗斜几何体，风格接近相机品牌 LOGO，SIL OFL 许可）。\n也可以填自己下载的任意艺术字体路径。")
     b_art_font = ttk.Button(f7, text="浏览...", command=browse_art_font)
     b_art_font.grid(row=0, column=2, padx=(4, 0), pady=5)
     add_scale(f7, 1, "大字大小:", v_art_font, 10, 60, "%.3f", 1000,
