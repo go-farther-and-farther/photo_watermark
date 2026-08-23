@@ -20,12 +20,13 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **五种水印样式**
+- **六种水印样式**
   - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
   - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
   - `art` — 艺术字体（品牌艺术字+拍摄参数叠加照片底部，无边框；默认内置 Montserrat Italic 粗斜体——风格接近相机品牌 LOGO 字样，可换成任意 TTF/OTF 艺术字体）
+  - `wordmark` — 官方LOGO（品牌官方LOGO字标图+机型+参数叠加照片底部，无边框；内置 16 品牌透明字标，字标大小/颜色独立可调，未匹配品牌时回退艺术字）
 
 - **自定义边框背景图**
   - 可自由选择一张图片作为水印边框的背景（strip/纯色边框样式生效）
@@ -311,7 +312,19 @@ ART_TEXT_SHADOW = True                 # 柔和阴影（白字在亮背景上推
 > 想换字体：把任意 TTF/OTF 放到 `assets/fonts/` 或任意位置，在设置窗口「艺术字体」里选路径（或改 `水印设置.ini` → `[艺术字体]` → `艺术字体路径`）。
 > 文字内容走 `文字模板` 段：`艺术格式`（第一行，默认 `{相机}`）和 `艺术参数格式`（第二行，默认 `{焦距} {光圈} {快门} {ISO}`）。
 
-**注意：exe用户需要将 `config.py`、`水印设置.ini`、`assets/fonts/` 和 `logos/` 文件夹放在exe同目录下（exe 内已内嵌默认字体和Logo，不带也能用）。**
+### wordmark 样式配置（官方LOGO）
+
+```python
+WORDMARK_RATIO = 0.04                  # 品牌LOGO字标高度（相对照片宽度比例），0.030小 0.040默认 0.055大
+WORDMARK_TEXT_COLOR = (255, 255, 255)  # 字标/文字颜色（字标图统一着色）
+WORDMARK_TEXT_SHADOW = True            # 柔和阴影（白字在亮背景上推荐开）
+```
+
+> 字标图来自 `assets/wordmarks/`（16 品牌透明PNG，从品牌官方LOGO抠出的文字）。
+> 机型文字（如 "Z7 2"）用艺术字体（`ART_FONT_PATH`），与字标同高。
+> 参数行大小共用 `ART_PARAMS_RATIO`。未匹配到品牌字标时自动回退 `art` 样式渲染。
+
+**注意：exe用户需要将 `config.py`、`水印设置.ini`、`assets/fonts/`、`assets/wordmarks/` 和 `logos/` 文件夹放在exe同目录下（exe 内已内嵌默认字体、字标和Logo，不带也能用）。**
 
 ## 效果预览
 
@@ -376,10 +389,22 @@ ART_TEXT_SHADOW = True                 # 柔和阴影（白字在亮背景上推
 └──────────────────────────────────────┘
 ```
 
-> 默认启用**官方LOGO字标**（设置→艺术字体→「使用官方LOGO字标」）：
-> 第一行优先渲染品牌官方字标图（内置 16 品牌透明字标，`assets/wordmarks/`，
-> 统一着色为文字颜色+柔和阴影），机型跟在字标后，如 `Nikon Z7 2`；
-> 未匹配到品牌LOGO时自动回退为艺术字体文字。
+### wordmark 样式（官方LOGO，无边框）
+
+```
+┌──────────────────────────────────────┐
+│                                      │
+│           原始照片区域                │
+│                                      │
+│        Nikon Z7 2      ← 官方字标图  │
+│       120mm F5.6 1/200 ISO64         │
+└──────────────────────────────────────┘
+```
+
+第一行是品牌官方LOGO字标图（内置 16 品牌透明字标，`assets/wordmarks/`，
+统一着色为文字颜色+柔和阴影），机型跟在字标后（艺术字体，同高），如 `Nikon Z7 2`；
+未匹配到品牌LOGO时自动回退为艺术字体文字。
+字标大小独立可调（设置→官方LOGO字标，默认 0.040）。
 
 ## 项目结构
 
@@ -398,7 +423,7 @@ photo_watermark/
 │   ├── pentax_logo.jpeg
 │   └── panasonic_logo.jpeg
 ├── assets/fonts/           # 艺术字体（内置 Montserrat-Italic.ttf、PlayfairDisplay-Italic.ttf，均 SIL OFL）
-├── assets/wordmarks/       # 官方LOGO字标（16品牌透明PNG，art 样式第一行优先用）
+├── assets/wordmarks/       # 官方LOGO字标（16品牌透明PNG，wordmark 样式第一行用）
 ├── pkg/                   # 打包配置（开发者用）
 │   ├── setup.py
 │   └── pyproject.toml
@@ -438,6 +463,7 @@ MIT License
 
 ## 更新日志
 
+- **v1.7.4**：官方LOGO字标从 `art` 样式中拆出，成为独立样式 **`wordmark`（官方LOGO）**：品牌官方LOGO字标+机型+参数叠加照片底部（无边框），字标大小独立可调（默认 0.040，比之前大，0.020–0.080 滑杆）、独立颜色/阴影设置；未匹配品牌时自动回退艺术字。`art` 样式回归纯艺术字（字体文件可自定义）；设置窗口新增「官方LOGO字标」区块，六样式预览同步更新
 - **v1.7.3**：`art` 样式第一行优先使用**品牌官方LOGO字标**（内置 16 个品牌的透明字标图：Nikon/Canon/Sony/Fuji/Hasselblad/Olympus/Panasonic/Pentax/Ricoh/Leica/Xiaomi/Huawei/Apple/DJI/Vivo/OPPO，统一着色为文字颜色+柔和阴影，机型跟在字标后，如 "Nikon Z7 2"）；未匹配品牌时自动回退艺术字体；设置窗口新增「使用官方LOGO字标」勾选框（可切回纯艺术字）；EXIF 机型规范化（`Z7_2` → `Z7 2`）；输出文件已存在时自动 `_2`、`_3` 唯一命名
 - **v1.7.2**：`art` 样式默认字体换为 Montserrat Italic（粗斜几何无衬线，风格接近相机品牌 LOGO 字样）；Playfair Display Italic 保留为可选字体（`assets/fonts/`，两个字体都内嵌 exe）；参数字体默认略加大（0.0135→0.015）
 - **v1.7.1**：新增 `art` 艺术字体样式（品牌艺术字+参数叠加照片底部，无边框）；内置 Playfair Display Italic（SIL OFL，exe 内嵌，可在设置窗口换任意 TTF/OTF 艺术字体）；设置窗口新增「艺术字体」区块（大字/参数字号、颜色、阴影、字体文件），五种样式预览同步更新

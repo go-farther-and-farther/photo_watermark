@@ -156,8 +156,16 @@ ART_TEXT_COLOR = (255, 255, 255)    # 白色
 # 柔和阴影（白字在亮背景上推荐开）
 ART_TEXT_SHADOW = True
 
-# 使用官方LOGO字标（True=品牌匹配时优先用字标图，False=纯艺术字体）
-ART_USE_WORDMARK = True
+# ==================== 官方LOGO字标样式（wordmark） ====================
+
+# 品牌LOGO字标高度（相对照片宽度比例，0.030小 0.040默认 0.055大）
+WORDMARK_RATIO = 0.04
+
+# 字标/文字颜色 (R, G, B)
+WORDMARK_TEXT_COLOR = (255, 255, 255)    # 白色
+
+# 柔和阴影（白字在亮背景上推荐开）
+WORDMARK_TEXT_SHADOW = True
 
 # ==================== 输出设置 ====================
 

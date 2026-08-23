@@ -48,7 +48,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.7.3'
+VERSION = 'v1.7.4'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -254,7 +254,11 @@ ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', 0.028, 'float'
 ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.015, 'float')
 ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
 ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', True, 'bool')
-ART_USE_WORDMARK = get_config_value('艺术字体', '使用官方字标', True, 'bool')  # 优先用品牌官方LOGO字标，无对应LOGO时回退艺术字体
+
+# 官方LOGO字标样式（wordmark）：品牌官方字标图 + 机型 + 参数，叠加照片底部（无边框）
+WORDMARK_RATIO = get_config_value('官方字标', '字标大小', 0.04, 'float')
+WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', '白色'))
+WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', True, 'bool')
 
 # 智能样式（'auto'=按照片方向自动选样式，'off'=固定用默认样式）
 SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool') else 'off'
@@ -1358,11 +1362,10 @@ def apply_art_style(
     params_ratio: float = 0.0,
     text_color: Tuple[int, int, int] = None,
     text_shadow: bool = None,
-    use_wordmark: bool = None,
 ) -> Image.Image:
     """
     应用艺术字体样式（art）
-    无边框：照片底部中央叠品牌字（第一行，优先官方LOGO字标，其次艺术字体加粗）
+    无边框：照片底部中央叠品牌艺术字（第一行，艺术字体加粗，可自定义字体文件）
     + 拍摄参数（第二行，普通字体）+ 自定义文字（第三行，可选），带柔和阴影
 
     Args:
@@ -1385,8 +1388,6 @@ def apply_art_style(
         text_color = ART_TEXT_COLOR
     if text_shadow is None:
         text_shadow = ART_TEXT_SHADOW
-    if use_wordmark is None:
-        use_wordmark = ART_USE_WORDMARK
 
     # 第一行：品牌+相机（模板 {相机}，兜底 品牌 → 自定义文字）
     line1_text = format_template(TEMPLATE_ART, exif_data)
@@ -1395,36 +1396,10 @@ def apply_art_style(
     if not line1_text:
         line1_text = DEFAULT_TEXT or ''
 
-    # 官方LOGO字标（优先于艺术字）：品牌匹配到字标图时，用它替代第一行文字
-    line1_image = None
-    model_part = ''  # 机型部分（如 "Z7 2"），画在字标右侧
-    if use_wordmark:
-        wm_path = get_wordmark_path(exif_data.get('brand', ''))
-        if wm_path:
-            try:
-                wm = Image.open(wm_path).convert('RGBA')
-                target_h = max(16, int(image.size[0] * font_ratio))
-                scale = target_h / wm.height
-                wm = wm.resize((max(1, int(wm.width * scale)), target_h), Image.LANCZOS)
-                # 统一着色为文字颜色（保留官方字标字形，照片上更可读）
-                line1_image = Image.new('RGBA', wm.size, tuple(text_color) + (255,))
-                line1_image.putalpha(wm.getchannel('A'))
-                line1_text = ''  # 字标替代第一行文字
-                # 机型部分：camera "NIKON Z7 2" → 去掉品牌前缀 → "Z7 2"
-                camera = exif_data.get('camera', '')
-                brand_core = (exif_data.get('brand', '') or '').upper()
-                for w in ['CORPORATION', 'CORP.', 'INC.', 'LTD.']:
-                    brand_core = brand_core.replace(w, '')
-                brand_core = brand_core.strip()
-                if brand_core and camera.upper().startswith(brand_core):
-                    model_part = camera[len(brand_core):].strip()
-            except Exception:
-                line1_image = None  # 字标加载失败 → 回退艺术字
-
     # 第二行：拍摄参数
     line2_text = format_template(TEMPLATE_ART_PARAMS, exif_data)
 
-    if not line1_text and line1_image is None and not line2_text and not custom_text:
+    if not line1_text and not line2_text and not custom_text:
         return image
 
     from PIL import ImageFilter  # 阴影模糊用
@@ -1452,41 +1427,144 @@ def apply_art_style(
     b1 = draw.textbbox((0, 0), line1_text, font=font1) if line1_text else (0, 0, 0, 0)
     b2 = draw.textbbox((0, 0), line2_text, font=font2) if line2_text else (0, 0, 0, 0)
     b3 = draw.textbbox((0, 0), custom_text, font=font2) if custom_text else (0, 0, 0, 0)
-    h2, h3 = b2[3] - b2[1], b3[3] - b3[1]
-    if line1_image is not None:
-        # 第一行 = 官方字标图 +（机型文字，底部对齐≈基线对齐）
-        b_m = draw.textbbox((0, 0), model_part, font=font1) if model_part else (0, 0, 0, 0)
-        row1_w = line1_image.width + (gap + (b_m[2] - b_m[0]) if model_part else 0)
-        h1 = line1_image.height
-    else:
-        b_m = (0, 0, 0, 0)
-        row1_w = b1[2] - b1[0]
-        h1 = b1[3] - b1[1]
+    h1, h2, h3 = b1[3] - b1[1], b2[3] - b2[1], b3[3] - b3[1]
     block_h = h1 + (gap + h2 if line2_text else 0) + (gap + h3 if custom_text else 0)
     bottom_margin = int(height * 0.045)
 
     y_cur = height - bottom_margin - block_h
-    if line1_image is not None:
-        x1 = (width - row1_w) // 2
-        # 字标阴影（黑色副本模糊偏移）
-        if text_shadow:
-            sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
-            off = max(1, h1 // 25)
-            sh_black = Image.new('RGBA', line1_image.size, (0, 0, 0, 200))
-            sh_black.putalpha(line1_image.getchannel('A'))
-            sh.paste(sh_black, (x1 + off, y_cur + off))
-            sh = sh.filter(ImageFilter.GaussianBlur(radius=max(1.5, h1 * 0.03)))
-            img.alpha_composite(sh)
-        img.alpha_composite(line1_image, (x1, y_cur))
-        if model_part:
-            x_m = x1 + line1_image.width + gap
-            y_m = y_cur + h1 - b_m[3]
-            _draw_with_shadow(model_part, (x_m, y_m), font1)
-        y_cur += h1 + gap
-    elif line1_text:
+    if line1_text:
         x1 = (width - (b1[2] - b1[0])) // 2 - b1[0]
         _draw_with_shadow(line1_text, (x1, y_cur - b1[1]), font1)
         y_cur += h1 + gap
+    if line2_text:
+        x2 = (width - (b2[2] - b2[0])) // 2 - b2[0]
+        _draw_with_shadow(line2_text, (x2, y_cur - b2[1]), font2)
+        y_cur += h2 + gap
+    if custom_text:
+        x3 = (width - (b3[2] - b3[0])) // 2 - b3[0]
+        _draw_with_shadow(custom_text, (x3, y_cur - b3[1]), font2)
+
+    return img.convert('RGB')
+
+
+def apply_wordmark_style(
+    image: Image.Image,
+    exif_data: Dict[str, str],
+    custom_text: str = '',
+    size_ratio: float = 0.0,
+    params_ratio: float = 0.0,
+    text_color: Tuple[int, int, int] = None,
+    text_shadow: bool = None,
+) -> Image.Image:
+    """
+    应用官方LOGO字标样式（wordmark）
+    无边框：照片底部中央叠品牌官方LOGO字标图（第一行，统一着色为文字颜色）
+    + 机型文字（艺术字体，如 "Z7 2"）+ 拍摄参数（第二行）+ 自定义文字（第三行），带柔和阴影
+    品牌未匹配到字标图时，回退为艺术字体文字（apply_art_style）
+
+    Args:
+        image: 原始图片
+        exif_data: EXIF数据
+        custom_text: 自定义文字（第三行，可选）
+        size_ratio: 字标高度（相对图片宽度，0=用全局 WORDMARK_RATIO）
+        params_ratio: 第二行字体大小（0=用全局 ART_PARAMS_RATIO，与艺术字体共用）
+        text_color: 字标/文字颜色（None=用全局 WORDMARK_TEXT_COLOR）
+        text_shadow: 是否柔和阴影（None=用全局 WORDMARK_TEXT_SHADOW）
+
+    Returns:
+        处理后的图片（尺寸不变）
+    """
+    if size_ratio <= 0:
+        size_ratio = WORDMARK_RATIO
+    if params_ratio <= 0:
+        params_ratio = ART_PARAMS_RATIO
+    if text_color is None:
+        text_color = WORDMARK_TEXT_COLOR
+    if text_shadow is None:
+        text_shadow = WORDMARK_TEXT_SHADOW
+
+    wm_path = get_wordmark_path(exif_data.get('brand', ''))
+    if not wm_path:
+        print(f"  [官方LOGO] 未找到品牌字标，回退艺术字体（品牌: {exif_data.get('brand', '')}）")
+        return apply_art_style(image, exif_data, custom_text,
+                               params_ratio=params_ratio,
+                               text_color=text_color, text_shadow=text_shadow)
+
+    # 机型部分：camera "NIKON Z7 2" → 去掉品牌前缀 → "Z7 2"
+    model_part = ''
+    camera = exif_data.get('camera', '')
+    brand_core = (exif_data.get('brand', '') or '').upper()
+    for w in ['CORPORATION', 'CORP.', 'INC.', 'LTD.']:
+        brand_core = brand_core.replace(w, '')
+    brand_core = brand_core.strip()
+    if brand_core and camera.upper().startswith(brand_core):
+        model_part = camera[len(brand_core):].strip()
+
+    # 第二行：拍摄参数
+    line2_text = format_template(TEMPLATE_ART_PARAMS, exif_data)
+
+    from PIL import ImageFilter  # 阴影模糊用
+
+    width, height = image.size
+    img = image.convert('RGBA')
+    draw = ImageDraw.Draw(img)
+
+    target_h = max(16, int(width * size_ratio))
+    font_model = get_art_font(target_h)      # 机型文字用艺术字体
+    font2 = get_font(max(12, int(width * params_ratio)))
+
+    try:
+        wm = Image.open(wm_path).convert('RGBA')
+        scale = target_h / wm.height
+        wm = wm.resize((max(1, int(wm.width * scale)), target_h), Image.LANCZOS)
+        # 统一着色（保留官方字标字形，照片上更可读）
+        line1_image = Image.new('RGBA', wm.size, tuple(text_color) + (255,))
+        line1_image.putalpha(wm.getchannel('A'))
+    except Exception as e:
+        print(f"  [官方LOGO] 字标加载失败，回退艺术字体: {e}")
+        return apply_art_style(image, exif_data, custom_text,
+                               params_ratio=params_ratio,
+                               text_color=text_color, text_shadow=text_shadow)
+
+    def _draw_with_shadow(text: str, xy: tuple, font):
+        """柔和阴影：黑色文字单独层模糊后偏移合成，再画彩色文字"""
+        fs = getattr(font, 'size', None) or 20
+        if text_shadow:
+            sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(sh).text(xy, text, font=font, fill=(0, 0, 0, 200))
+            sh = sh.filter(ImageFilter.GaussianBlur(radius=max(1.5, fs * 0.03)))
+            off = max(1, fs // 25)
+            img.alpha_composite(sh, (off, off))
+        ImageDraw.Draw(img).text(xy, text, font=font, fill=tuple(text_color) + (255,))
+
+    # 布局：底部中央（字标+机型 在上，参数在下，自定义文字最后）
+    gap = max(4, int(width * 0.006))
+    b_m = draw.textbbox((0, 0), model_part, font=font_model) if model_part else (0, 0, 0, 0)
+    b2 = draw.textbbox((0, 0), line2_text, font=font2) if line2_text else (0, 0, 0, 0)
+    b3 = draw.textbbox((0, 0), custom_text, font=font2) if custom_text else (0, 0, 0, 0)
+    row1_w = line1_image.width + (gap + (b_m[2] - b_m[0]) if model_part else 0)
+    h1, h2, h3 = line1_image.height, b2[3] - b2[1], b3[3] - b3[1]
+    block_h = h1 + (gap + h2 if line2_text else 0) + (gap + h3 if custom_text else 0)
+    bottom_margin = int(height * 0.045)
+
+    y_cur = height - bottom_margin - block_h
+    x1 = (width - row1_w) // 2
+    # 字标阴影（黑色副本模糊偏移）
+    if text_shadow:
+        sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        off = max(1, h1 // 25)
+        sh_black = Image.new('RGBA', line1_image.size, (0, 0, 0, 200))
+        sh_black.putalpha(line1_image.getchannel('A'))
+        sh.paste(sh_black, (x1 + off, y_cur + off))
+        sh = sh.filter(ImageFilter.GaussianBlur(radius=max(1.5, h1 * 0.03)))
+        img.alpha_composite(sh)
+    img.alpha_composite(line1_image, (x1, y_cur))
+    # 机型文字（底部对齐≈基线对齐）
+    if model_part:
+        x_m = x1 + line1_image.width + gap
+        y_m = y_cur + h1 - b_m[3]
+        _draw_with_shadow(model_part, (x_m, y_m), font_model)
+    y_cur += h1 + gap
     if line2_text:
         x2 = (width - (b2[2] - b2[0])) // 2 - b2[0]
         _draw_with_shadow(line2_text, (x2, y_cur - b2[1]), font2)
@@ -1561,7 +1639,14 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             params_ratio=kwargs.get('params_ratio', 0.0),
             text_color=kwargs.get('text_color', None),
             text_shadow=kwargs.get('text_shadow', None),
-            use_wordmark=kwargs.get('use_wordmark', None),
+        )
+    elif style == 'wordmark':
+        return apply_wordmark_style(
+            image, exif_data, custom_text,
+            size_ratio=kwargs.get('size_ratio', 0.0),
+            params_ratio=kwargs.get('params_ratio', 0.0),
+            text_color=kwargs.get('text_color', None),
+            text_shadow=kwargs.get('text_shadow', None),
         )
     else:
         print(f"  [警告] 未知样式: {style}")
@@ -1901,7 +1986,7 @@ def refresh_globals_from_ini():
         TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
         BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO, \
         ART_FONT_PATH, ART_FONT_RATIO, ART_PARAMS_RATIO, ART_TEXT_COLOR, ART_TEXT_SHADOW, \
-        ART_USE_WORDMARK
+        WORDMARK_RATIO, WORDMARK_TEXT_COLOR, WORDMARK_TEXT_SHADOW
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
@@ -1925,7 +2010,9 @@ def refresh_globals_from_ini():
     ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', ART_PARAMS_RATIO, 'float')
     ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
     ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', ART_TEXT_SHADOW, 'bool')
-    ART_USE_WORDMARK = get_config_value('艺术字体', '使用官方字标', ART_USE_WORDMARK, 'bool')
+    WORDMARK_RATIO = get_config_value('官方字标', '字标大小', WORDMARK_RATIO, 'float')
+    WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', '白色'))
+    WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', WORDMARK_TEXT_SHADOW, 'bool')
     _art_font_cache.clear()  # 字体可能变了，清缓存
 
 
@@ -1938,7 +2025,8 @@ PREVIEW_OVERRIDABLE = (
     'BORDER_BACKGROUND_IMAGE', 'BORDER_BACKGROUND_OPACITY',
     'BORDER_FRAME_COLOR', 'BORDER_TEXT_COLOR', 'COLOR_BORDER', 'SMART_STYLE',
     'ART_FONT_PATH', 'ART_FONT_RATIO', 'ART_PARAMS_RATIO',
-    'ART_TEXT_COLOR', 'ART_TEXT_SHADOW', 'ART_USE_WORDMARK',
+    'ART_TEXT_COLOR', 'ART_TEXT_SHADOW',
+    'WORDMARK_RATIO', 'WORDMARK_TEXT_COLOR', 'WORDMARK_TEXT_SHADOW',
 )
 
 # 预览渲染互斥锁：防止后台线程并发改全局配置导致渲染错乱
@@ -2155,9 +2243,11 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     v_art_font = tk.IntVar(value=int(ART_FONT_RATIO * 1000))          # 千分比
     v_art_params = tk.IntVar(value=int(ART_PARAMS_RATIO * 10000))     # 万分比
     v_art_shadow = tk.BooleanVar(value=bool(ART_TEXT_SHADOW))
-    v_art_wordmark = tk.BooleanVar(value=bool(ART_USE_WORDMARK))
     v_art_color = tk.StringVar(value=color_to_name(ART_TEXT_COLOR))
     v_art_path = tk.StringVar(value=ART_FONT_PATH)
+    v_wm_ratio = tk.IntVar(value=int(WORDMARK_RATIO * 1000))           # 千分比
+    v_wm_color = tk.StringVar(value=color_to_name(WORDMARK_TEXT_COLOR))
+    v_wm_shadow = tk.BooleanVar(value=bool(WORDMARK_TEXT_SHADOW))
 
     # ===== 实时预览（嵌入设置窗口右侧） =====
     # 默认预览样式：主窗口勾选的第一个，否则用全局默认样式
@@ -2188,7 +2278,9 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             'ART_PARAMS_RATIO': v_art_params.get() / 10000.0,
             'ART_TEXT_COLOR': parse_color(v_art_color.get()),
             'ART_TEXT_SHADOW': v_art_shadow.get(),
-            'ART_USE_WORDMARK': v_art_wordmark.get(),
+            'WORDMARK_RATIO': v_wm_ratio.get() / 1000.0,
+            'WORDMARK_TEXT_COLOR': parse_color(v_wm_color.get()),
+            'WORDMARK_TEXT_SHADOW': v_wm_shadow.get(),
         }
 
     def refresh_preview():
@@ -2370,8 +2462,10 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             v_art_font.set(int(round(gd('艺术字体', '字体大小', 0.028, float) * 1000)))
             v_art_params.set(int(round(gd('艺术字体', '参数字体大小', 0.015, float) * 10000)))
             v_art_shadow.set(str(gd('艺术字体', '文字阴影', '是')).lower() in ('是', 'yes', 'true', '1'))
-            v_art_wordmark.set(str(gd('艺术字体', '使用官方字标', '是')).lower() in ('是', 'yes', 'true', '1'))
             v_art_color.set(color_to_name(parse_color(gd('艺术字体', '文字颜色', '白色'))))
+            v_wm_ratio.set(int(round(gd('官方字标', '字标大小', 0.04, float) * 1000)))
+            v_wm_color.set(color_to_name(parse_color(gd('官方字标', '文字颜色', '白色'))))
+            v_wm_shadow.set(str(gd('官方字标', '文字阴影', '是')).lower() in ('是', 'yes', 'true', '1'))
             refresh_preview()
         except Exception as e:
             messagebox.showerror("恢复默认失败", f"恢复默认时出错：\n{e}", parent=win)
@@ -2401,7 +2495,9 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             ('艺术字体', '参数字体大小', fmt_float(v_art_params.get() / 10000)),
             ('艺术字体', '文字颜色', v_art_color.get()),
             ('艺术字体', '文字阴影', '是' if v_art_shadow.get() else '否'),
-            ('艺术字体', '使用官方字标', '是' if v_art_wordmark.get() else '否'),
+            ('官方字标', '字标大小', fmt_float(v_wm_ratio.get() / 1000)),
+            ('官方字标', '文字颜色', v_wm_color.get()),
+            ('官方字标', '文字阴影', '是' if v_wm_shadow.get() else '否'),
         ]
         failures = []
         for sec, key, val in save_items:
@@ -2593,9 +2689,24 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     ToolTip(cb_art_color, "艺术字体样式里文字的颜色（默认白色）。")
     cb_art_shadow = ttk.Checkbutton(f7, text="柔和阴影（推荐开，白字更清晰）", variable=v_art_shadow)
     cb_art_shadow.grid(row=6, column=0, columnspan=3, sticky='w', pady=5)
-    cb_art_wordmark = ttk.Checkbutton(f7, text="使用官方LOGO字标（品牌匹配时优先，未匹配回退艺术字体）", variable=v_art_wordmark)
-    cb_art_wordmark.grid(row=7, column=0, columnspan=3, sticky='w', pady=5)
-    ToolTip(cb_art_wordmark, "勾选后，艺术字体样式的第一行优先使用品牌官方LOGO字标\n（内置 16 个品牌的透明字标图，统一着色为文字颜色），\n相机机型跟在字标后面（如 Nikon Z7 2）。\n未匹配到品牌LOGO时自动回退为艺术字体文字。")
+
+    # 官方LOGO字标（wordmark 样式独立设置）
+    f_wm = ttk.LabelFrame(tab_s, text="官方LOGO字标（wordmark）", padding=10)
+    f_wm.pack(fill='x')
+    f_wm.columnconfigure(1, weight=1)
+    ToolTip(f_wm, "「官方LOGO」样式：第一行用品牌官方LOGO字标图\n（内置 16 品牌透明字标，统一着色+柔和阴影），机型跟在字标后（如 Nikon Z7 2）。\n未匹配到品牌LOGO时自动回退为艺术字体文字。\n参数行大小共用上方「艺术字体 → 参数字体大小」。")
+    add_scale(f_wm, 0, "字标大小:", v_wm_ratio, 20, 80, "%.3f", 1000,
+              tip="品牌LOGO字标的高度（相对照片宽度的比例）：\n0.030=小，0.040=默认，0.055=大。\n机型文字（如 Z7 2）用艺术字体，与字标同高。")
+    ttk.Label(f_wm, text="（0.030=小 0.040=默认 0.055=大）", foreground='#666666').grid(
+        row=1, column=0, columnspan=3, sticky='w', pady=(0, 2))
+    ttk.Label(f_wm, text="文字颜色:").grid(row=2, column=0, sticky='w', pady=5)
+    cb_wm_color = ttk.Combobox(f_wm, textvariable=v_wm_color,
+                               values=['黑色', '白色', '灰色', '红色', '绿色', '蓝色'],
+                               state='readonly', width=18)
+    cb_wm_color.grid(row=2, column=1, sticky='ew', pady=5)
+    ToolTip(cb_wm_color, "官方LOGO字标和文字的颜色（字标图统一着色，默认白色）。")
+    cb_wm_shadow = ttk.Checkbutton(f_wm, text="柔和阴影（推荐开，白字更清晰）", variable=v_wm_shadow)
+    cb_wm_shadow.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
 
     # ===== 右侧：实时预览（2x2 网格，四种样式同步更新） =====
     f5 = ttk.LabelFrame(outer, text=" 实时预览（五种样式同步更新） ", padding=8)
@@ -2640,7 +2751,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
         refresh_preview()  # 首次渲染
         for _var in (v_text, v_bg, v_bg_alpha, v_strip_h, v_logo_h,
                      v_pos, v_alpha, v_font, v_border_color, v_border_text, v_brand, v_smart,
-                     v_art_font, v_art_params, v_art_shadow, v_art_color, v_art_path, v_art_wordmark):
+                     v_art_font, v_art_params, v_art_shadow, v_art_color, v_art_path,
+                      v_wm_ratio, v_wm_color, v_wm_shadow):
             try:
                 _var.trace_add('write', lambda *a: refresh_preview())
             except Exception:
@@ -2657,7 +2769,8 @@ STYLE_OPTIONS = [
     ('transparent', '半透明', '文字直接叠加在照片上'),
     ('border', '纯色边框', '边框包裹照片，底部显示参数'),
     ('blur', '模糊边框', '边缘模糊背景，效果自然'),
-    ('art', '艺术字体', '品牌艺术字+参数，叠加照片底部'),
+    ('art', '艺术字体', '品牌艺术字+参数，叠加照片底部（字体可自定义）'),
+    ('wordmark', '官方LOGO', '品牌官方LOGO字标+机型+参数，叠加照片底部'),
 ]
 
 # 品牌选项（显示名, 配置值）；空值=自动识别EXIF品牌
@@ -3656,7 +3769,7 @@ def main():
             sys.exit(0)
 
     # 验证样式参数
-    valid_styles = {'strip', 'transparent', 'border', 'blur', 'art'}
+    valid_styles = {'strip', 'transparent', 'border', 'blur', 'art', 'wordmark'}
     for s in args.style.split(','):
         if s.strip() not in valid_styles:
             print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")
