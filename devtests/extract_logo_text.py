@@ -79,7 +79,12 @@ def extract_logo_text(path: Path) -> Path:
         max_h = max(sl[0].stop - sl[0].start for sl in objects)
         for i, sl in enumerate(objects, 1):
             comp_h = sl[0].stop - sl[0].start
-            if areas[i - 1] < 0.05 * max_area or comp_h < 0.35 * max_h:
+            comp_w = sl[1].stop - sl[1].start
+            area = float(areas[i - 1])
+            fill = area / (comp_h * comp_w) if comp_h * comp_w > 0 else 0.0
+            # 点号豁免：小而圆润（填充率高、近方形）的组件是 i/j 的点，不是虚线
+            is_dot = fill >= 0.5 and 0.5 <= comp_h / max(1, comp_w) <= 1.6 and area >= 300
+            if area < 0.05 * max_area and not is_dot:
                 alpha[lab == i] = 0
     out = np.dstack([arr[:, :, :3], alpha])
 
