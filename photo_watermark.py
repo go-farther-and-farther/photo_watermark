@@ -105,7 +105,11 @@ def load_ini_config() -> configparser.ConfigParser:
     个人配置后加载，覆盖默认配置；个人配置不存在时全部用默认值。
     这样更新程序时个人设置保留在 用户设置.ini 中，不会被新版默认配置覆盖。
     """
-    config = configparser.ConfigParser()
+    # interpolation=None：配置值可能含 %（如「满100减20%」、带%的路径），
+    # 默认插值器会让读取阶段抛 InterpolationSyntaxError 导致启动崩溃
+    # strict=False：容忍同一节里仅大小写不同的重复键（旧版写入小写键、新版
+    # 写入原样键的历史遗留），重复时取后值，避免整个文件解析失败丢失全部个人配置
+    config = configparser.ConfigParser(interpolation=None, strict=False)
     default_path = Path(resource_path('水印设置.ini'))
     user_path = get_base_dir() / '用户设置.ini'
 
@@ -123,6 +127,20 @@ def load_ini_config() -> configparser.ConfigParser:
         except Exception as e:
             print(f"[警告] 个人配置读取失败: {e}")
 
+        # 旧版模板把边框颜色放在 [纯色边框]，新版统一在 [颜色设置]；
+        # 默认 ini 固定含 [颜色设置]，若不在此处提升旧键，用户旧颜色会被
+        # 默认的 黑色/白色 提前命中而静默丢失（upgrade 兼容的关键一步）
+        try:
+            legacy = configparser.ConfigParser(interpolation=None, strict=False)
+            legacy.read(user_path, encoding='utf-8')
+            for old_key, new_key in (('边框颜色', '边框颜色'), ('文字颜色', '边框文字颜色')):
+                if legacy.has_option('纯色边框', old_key):
+                    if not config.has_section('颜色设置'):
+                        config.add_section('颜色设置')
+                    config.set('颜色设置', new_key, legacy.get('纯色边框', old_key))
+        except Exception as e:
+            print(f"[警告] 旧版边框颜色迁移失败: {e}")
+
     return config
 
 
@@ -133,14 +151,19 @@ _ini_config = load_ini_config()
 def get_config_value(section: str, key: str, fallback, value_type: str = 'str'):
     """从 .ini 配置获取值，支持类型转换"""
     if _ini_config.has_option(section, key):
-        if value_type == 'int':
-            return _ini_config.getint(section, key)
-        elif value_type == 'float':
-            return _ini_config.getfloat(section, key)
-        elif value_type == 'bool':
-            return _ini_config.get(section, key).lower() in ('是', 'yes', 'true', '1')
-        else:
-            return _ini_config.get(section, key)
+        try:
+            if value_type == 'int':
+                return _ini_config.getint(section, key)
+            elif value_type == 'float':
+                return _ini_config.getfloat(section, key)
+            elif value_type == 'bool':
+                return _ini_config.get(section, key).lower() in ('是', 'yes', 'true', '1')
+            else:
+                return _ini_config.get(section, key)
+        except (ValueError, TypeError):
+            # 手编 ini 写坏数字字段时回退默认值，不让程序在导入期崩溃
+            print(f"[警告] 配置 {section}/{key} 值非法，使用默认值: {fallback!r}")
+            return fallback
     return fallback
 
 
@@ -236,9 +259,10 @@ TRANSPARENT_POSITION = parse_position(get_config_value('半透明水印', '位�
 TRANSPARENT_OPACITY = get_config_value('半透明水印', '透明度', TRANSPARENT_OPACITY if 'TRANSPARENT_OPACITY' in dir() else 128, 'int')
 TRANSPARENT_FONT_RATIO = get_config_value('半透明水印', '字体大小', TRANSPARENT_FONT_RATIO if 'TRANSPARENT_FONT_RATIO' in dir() else 0.03, 'float')
 
-# 纯色边框样式
-BORDER_FRAME_COLOR = parse_color(get_config_value('纯色边框', '边框颜色', '黑色'))
-BORDER_TEXT_COLOR = parse_color(get_config_value('纯色边框', '文字颜色', '白色'))
+# 纯色边框样式（颜色键统一在 [颜色设置]；旧模板 [纯色边框] 的键
+# 由 load_ini_config 在加载时提升过来，见其中的迁移注释）
+BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
+BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
 BORDER_SIDE_RATIO = get_config_value('纯色边框', '边框宽度', BORDER_SIDE_RATIO if 'BORDER_SIDE_RATIO' in dir() else 0.04, 'float')
 BORDER_BOTTOM_RATIO = get_config_value('纯色边框', '底部宽度', BORDER_BOTTOM_RATIO if 'BORDER_BOTTOM_RATIO' in dir() else 0.08, 'float')
 
@@ -361,24 +385,29 @@ def read_exif(image_path: str) -> Dict[str, str]:
 
         # 方向信息
         if 'Image Orientation' in tags:
-            orientation_str = str(tags['Image Orientation']).strip()
-            # 尝试解析数字
+            tag = tags['Image Orientation']
+            # 优先取原始数值（exifread 的 str() 是文本描述，数值才是权威）
             try:
-                exif_data['orientation'] = int(orientation_str)
-            except ValueError:
-                # 解析文字描述
+                values = getattr(tag, 'values', None)
+                exif_data['orientation'] = int(values[0])
+            except (IndexError, TypeError, ValueError):
+                exif_data['orientation'] = None
+            if exif_data['orientation'] is None:
+                # 兜底：解析文本描述（键名与 exifread 3.x 打印措辞一致）
+                orientation_str = str(tag).strip()
                 orientation_map = {
                     'Horizontal (normal)': 1,
-                    'Rotated 90 CCW': 8,  # 逆时针90度 = EXIF的8
+                    'Rotated 90 CCW': 8,   # 逆时针90度 = EXIF的8
                     'Rotated 180': 3,
-                    'Rotated 90 CW': 6,   # 顺时针90度 = EXIF的6
-                    'Mirrored': 2,
-                    'Mirrored horizontally, rotated 90 CW': 5,
-                    'Mirrored vertically': 4,
-                    'Mirrored horizontally, rotated 90 CCW': 7,
+                    'Rotated 90 CW': 6,    # 顺时针90度 = EXIF的6
+                    'Mirrored horizontal': 2,
+                    'Mirrored vertical': 4,
+                    'Mirrored horizontal then rotated 90 CCW': 5,
+                    'Mirrored horizontal then rotated 90 CW': 7,
                 }
                 exif_data['orientation'] = orientation_map.get(orientation_str, 1)
-                print(f"  EXIF方向: {orientation_str} -> {exif_data['orientation']}")
+                if exif_data['orientation'] != 1:
+                    print(f"  EXIF方向: {orientation_str} -> {exif_data['orientation']}")
 
         # 品牌信息（优先从 Image Make 读取）
         if 'Image Make' in tags:
@@ -438,11 +467,11 @@ def read_exif(image_path: str) -> Dict[str, str]:
         if 'EXIF ExposureTime' in tags:
             shutter = tags['EXIF ExposureTime']
             if hasattr(shutter, 'num') and hasattr(shutter, 'den'):
-                if shutter.num == 1:
-                    exif_data['shutter'] = f"1/{shutter.den}s"
-                elif shutter.den == 1:
-                    # 快门速度 >= 1秒，显示为整数秒
+                if shutter.den == 1:
+                    # 快门速度 >= 1秒（含恰为 1s，exifread 会约分成 1/1），显示为整数秒
                     exif_data['shutter'] = f"{shutter.num}s"
+                elif shutter.num == 1:
+                    exif_data['shutter'] = f"1/{shutter.den}s"
                 else:
                     exif_data['shutter'] = f"{shutter.num}/{shutter.den}s"
             else:
@@ -456,8 +485,11 @@ def read_exif(image_path: str) -> Dict[str, str]:
         if 'EXIF FocalLength' in tags:
             focal = tags['EXIF FocalLength']
             if hasattr(focal, 'num') and hasattr(focal, 'den'):
-                focal_mm = focal.num / focal.den
-                exif_data['focal_length'] = f"{focal_mm:.0f}mm"
+                try:
+                    focal_mm = focal.num / focal.den
+                    exif_data['focal_length'] = f"{focal_mm:.0f}mm"
+                except (ZeroDivisionError, ValueError, TypeError):
+                    pass  # 畸形 EXIF：焦距留空，不中断后续字段解析
             else:
                 exif_data['focal_length'] = f"{focal}mm"
 
@@ -675,7 +707,7 @@ def get_wordmark_path(brand: str) -> str:
 
 def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
     """
-    根据EXIF方向信息自动旋转图片
+    根据EXIF方向信息自动旋转图片（与 Pillow exif_transpose 权威映射一致）
 
     Args:
         image: 原始图片
@@ -684,21 +716,19 @@ def auto_rotate_image(image: Image.Image, orientation: int) -> Image.Image:
     Returns:
         旋转后的图片
     """
-    if orientation == 2:
-        image = image.transpose(Image.FLIP_LEFT_RIGHT)
-    elif orientation == 3:
-        image = image.rotate(180, expand=True)
-    elif orientation == 4:
-        image = image.transpose(Image.FLIP_TOP_BOTTOM)
-    elif orientation == 5:
-        image = image.rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
-    elif orientation == 6:
-        image = image.rotate(270, expand=True)
-    elif orientation == 7:
-        image = image.rotate(270, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
-    elif orientation == 8:
-        image = image.rotate(90, expand=True)
-    return image
+    ops = {
+        2: lambda im: im.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
+        3: lambda im: im.transpose(Image.Transpose.ROTATE_180),
+        4: lambda im: im.transpose(Image.Transpose.FLIP_TOP_BOTTOM),
+        5: lambda im: im.transpose(Image.Transpose.TRANSPOSE),
+        6: lambda im: im.transpose(Image.Transpose.ROTATE_270),
+        7: lambda im: im.transpose(Image.Transpose.TRANSVERSE),
+        8: lambda im: im.transpose(Image.Transpose.ROTATE_90),
+    }
+    op = ops.get(orientation)
+    if op is None:
+        return image
+    return op(image)
 
 
 def create_frame_canvas(size: Tuple[int, int], base_color: Tuple[int, int, int]) -> Image.Image:
@@ -1270,41 +1300,58 @@ def apply_blur_border(
     text_block_height = font_size * 2 + 8
     y_start = height + border_size + (bottom_border - text_block_height) // 2
 
-    # 绘制第一行（拍摄参数）
+    # ========== 绘制文字（阴影画在独立 RGBA 层再合成） ==========
+    # 注意：bg_image 是 RGB 模式，直接 fill=(0,0,0,180) 会被丢弃 alpha，
+    # 变成不透明黑色鬼影字；必须先在透明层上作画，模糊后 alpha_composite。
+    if text_shadow:
+        shadow_layer = Image.new('RGBA', new_image.size, (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow_layer)
+    else:
+        shadow_draw = None
+
+    def _shadow(text, x, y, fnt):
+        if shadow_draw:
+            offset = max(1, font_size // 15)
+            shadow_draw.text((x + offset, y + offset), text,
+                             fill=(0, 0, 0, 170), font=fnt)
+
+    # 居中 x 只依赖 (text, font)，算一次存进行里，避免合成时重复 textbbox
+    def _center_x(text, fnt):
+        bbox = draw.textbbox((0, 0), text, font=fnt)
+        return (new_width - (bbox[2] - bbox[0])) // 2
+
+    rows = []
     if line1_text:
-        bbox = draw.textbbox((0, 0), line1_text, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (new_width - text_width) // 2
-        if text_shadow:
-            shadow_offset = max(1, font_size // 15)
-            draw.text((x + shadow_offset, y_start + shadow_offset), line1_text,
-                      fill=(0, 0, 0, 180), font=font)
-        draw.text((x, y_start), line1_text, fill=text_color, font=font)
-
-    # 绘制第二行（日期）
+        x1 = _center_x(line1_text, font)
+        _shadow(line1_text, x1, y_start, font)
+        rows.append((line1_text, x1, y_start, font))
     if line2_text:
-        bbox = draw.textbbox((0, 0), line2_text, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (new_width - text_width) // 2
         y2 = y_start + font_size + 6
-        if text_shadow:
-            shadow_offset = max(1, font_size // 15)
-            draw.text((x + shadow_offset, y2 + shadow_offset), line2_text,
-                      fill=(0, 0, 0, 180), font=font)
-        draw.text((x, y2), line2_text, fill=text_color, font=font)
-
-    # 绘制自定义文字（如果有，放在第三行）
+        x2 = _center_x(line2_text, font)
+        _shadow(line2_text, x2, y2, font)
+        rows.append((line2_text, x2, y2, font))
     if custom_text:
         custom_font = get_font(max(12, font_size - 2))
-        bbox = draw.textbbox((0, 0), custom_text, font=custom_font)
-        text_width = bbox[2] - bbox[0]
-        x = (new_width - text_width) // 2
         y3 = y_start + (font_size + 6) * 2
-        if text_shadow:
-            shadow_offset = max(1, font_size // 15)
-            draw.text((x + shadow_offset, y3 + shadow_offset), custom_text,
-                      fill=(0, 0, 0, 180), font=custom_font)
-        draw.text((x, y3), custom_text, fill=text_color, font=custom_font)
+        x3 = _center_x(custom_text, custom_font)
+        _shadow(custom_text, x3, y3, custom_font)
+        rows.append((custom_text, x3, y3, custom_font))
+
+    if rows:
+        # 阴影/文字墨迹只存在于底部文字条：只对该条带做 RGBA 转换、模糊与合成，
+        # 避免整幅图 3 次全图遍历 + 全图高斯模糊（大图上每张可省 1-2 秒）
+        blur_radius = max(1.5, font_size * 0.04)
+        pad = int(blur_radius * 3) + max(4, font_size // 15) + 2  # 模糊扩散 + 阴影偏移余量
+        strip_top = max(0, min(y for _, _, y, _ in rows) - pad)
+
+        strip = new_image.crop((0, strip_top, new_width, new_height)).convert('RGBA')
+        if shadow_draw:
+            shadow_strip = shadow_layer.crop((0, strip_top, new_width, new_height))
+            strip.alpha_composite(shadow_strip.filter(ImageFilter.GaussianBlur(radius=blur_radius)))
+        text_draw = ImageDraw.Draw(strip)
+        for text, x, y, fnt in rows:
+            text_draw.text((x, y - strip_top), text, fill=text_color, font=fnt)
+        new_image.paste(strip.convert('RGB'), (0, strip_top))
 
     return new_image
 
@@ -1705,8 +1752,9 @@ def process_single_image(
             print(f"  [警告] 图片尺寸过小，跳过: {image.width}x{image.height}")
             return 'failed'
 
-        # 确保是RGB模式
-        if image.mode in ('RGBA', 'P'):
+        # 确保是RGB模式（覆盖 RGBA/P 及灰度带透明 LA、16位灰度 I;16 等：
+        # 这些模式会让 blur/art/wordmark 样式抛 wrong-mode 或无法保存 JPEG）
+        if image.mode != 'RGB':
             image = image.convert('RGB')
 
         # 读取EXIF信息
@@ -1964,11 +2012,22 @@ def update_ini_value(section: str, key: str, value_str: str) -> bool:
     """
     user_path = get_base_dir() / '用户设置.ini'
     try:
-        cp = configparser.ConfigParser()
+        # interpolation=None + optionxform=str：
+        # 值可能含 %，键名含大写（如「JPEG质量」「Logo高度」），
+        # ConfigParser 默认行为会把键改成小写、对 % 抛插值异常
+        # strict=False：容忍文件里已有的重复键，读取后随写随清理（见下）
+        cp = configparser.ConfigParser(interpolation=None, strict=False)
+        cp.optionxform = str
         if user_path.exists():
             cp.read(user_path, encoding='utf-8')
         if not cp.has_section(section):
             cp.add_section(section)
+        # 清理同节内仅大小写不同的旧键：旧版 optionxform 会把键折叠成小写
+        # 写盘（如 jpeg质量），这里若直接 set 原样键（JPEG质量）会出现两个键，
+        # strict 读取端会抛 DuplicateOptionError 导致个人配置整段丢失
+        for opt in cp.options(section):
+            if opt != key and opt.lower() == key.lower():
+                cp.remove_option(section, opt)
         cp.set(section, key, value_str)
         user_path.parent.mkdir(parents=True, exist_ok=True)
         with open(user_path, 'w', encoding='utf-8') as f:
@@ -1983,9 +2042,10 @@ def update_ini_value(section: str, key: str, value_str: str) -> bool:
         return False
 
 
-def fmt_float(value: float) -> str:
-    """浮点格式化为ini值：去掉多余的尾随零（0.080 -> 0.08, 1.000 -> 1）"""
-    s = f"{value:.3f}".rstrip('0').rstrip('.')
+def fmt_float(value: float, digits: int = 3) -> str:
+    """浮点格式化为ini值：去掉多余的尾随零（0.080 -> 0.08, 1.000 -> 1）
+    digits 控制小数位上限；万分比字段（如参数字体大小）传 4 防止 round-trip 漂移"""
+    s = f"{value:.{digits}f}".rstrip('0').rstrip('.')
     return s if s else '0'
 
 
@@ -1996,7 +2056,8 @@ def refresh_globals_from_ini():
         TRANSPARENT_POSITION, TRANSPARENT_OPACITY, TRANSPARENT_FONT_RATIO, \
         BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO, \
         ART_FONT_PATH, ART_FONT_RATIO, ART_PARAMS_RATIO, ART_TEXT_COLOR, ART_TEXT_SHADOW, \
-        WORDMARK_RATIO, WORDMARK_TEXT_COLOR, WORDMARK_TEXT_SHADOW
+        WORDMARK_RATIO, WORDMARK_TEXT_COLOR, WORDMARK_TEXT_SHADOW, \
+        BORDER_HEIGHT_RATIO
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
@@ -2004,7 +2065,7 @@ def refresh_globals_from_ini():
     SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', False, 'bool') else 'off'
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
     JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING, 'int')
-    JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
+    BORDER_HEIGHT_RATIO = get_config_value('白条边框', '边框高度', BORDER_HEIGHT_RATIO, 'float')
     AUTO_OPEN_OUTPUT = get_config_value('基础设置', '自动打开输出', AUTO_OPEN_OUTPUT, 'bool')
     SHOW_CONSOLE_WINDOW = get_config_value('基础设置', '显示控制台窗口', SHOW_CONSOLE_WINDOW, 'bool')
     BORDER_BACKGROUND_IMAGE = get_config_value('基础设置', '边框背景图', BORDER_BACKGROUND_IMAGE)
@@ -2101,9 +2162,9 @@ def render_preview(
                         saved[k] = globals()[k]
                         globals()[k] = v
 
-            # 2. 读取图片
+            # 2. 读取图片（统一规范为 RGB，非常规模式同样会导致部分样式渲染失败）
             image = Image.open(photo_path)
-            if image.mode in ('RGBA', 'P'):
+            if image.mode != 'RGB':
                 image = image.convert('RGB')
 
             # 3. EXIF + 自动旋转
@@ -2388,8 +2449,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
                 new_v = int(round(val * divisor))
                 if new_v != var.get():   # 值未变则不写，避免循环
                     var.set(new_v)
-            except (ValueError, AttributeError):
-                pass
+            except (ValueError, AttributeError, OverflowError):
+                pass  # 非法文本或 inf 等超界值：忽略本次输入
 
         def _normalize(event=None):
             """回车/失焦时把输入规范化为标准格式"""
@@ -2432,7 +2493,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
                 parent=win):
             return
         try:
-            cp = configparser.ConfigParser()
+            cp = configparser.ConfigParser(interpolation=None)
             dp = Path(resource_path('水印设置.ini'))
             if dp.exists():
                 cp.read(dp, encoding='utf-8')
@@ -2502,7 +2563,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             ('颜色设置', '边框文字颜色', v_border_text.get()),
             ('艺术字体', '艺术字体路径', v_art_path.get()),
             ('艺术字体', '字体大小', fmt_float(v_art_font.get() / 1000)),
-            ('艺术字体', '参数字体大小', fmt_float(v_art_params.get() / 10000)),
+            ('艺术字体', '参数字体大小', fmt_float(v_art_params.get() / 10000, 4)),
             ('艺术字体', '文字颜色', v_art_color.get()),
             ('艺术字体', '文字阴影', '是' if v_art_shadow.get() else '否'),
             ('官方字标', '字标大小', fmt_float(v_wm_ratio.get() / 1000)),
@@ -2918,7 +2979,8 @@ def select_paths_gui() -> tuple:
         root = tk.Tk()
         drop_supported = False
     root.title("Photo Watermark - 选择照片")
-    root.resizable(False, False)
+    # 允许自由缩放窗口；预览区通过 <Configure> 自适应（见 _fit_preview_to_window）
+    root.resizable(True, True)
 
     # 尝试使用中文字体（微软雅黑），失败则用系统默认
     try:
@@ -3006,6 +3068,12 @@ def select_paths_gui() -> tuple:
         else:
             pv_single_frame.pack_forget()
             pv_grid_frame.pack()
+        # 切换视图后按当前面板实际尺寸重新自适应（_fit_state 在构建期定义，调用时已存在）
+        try:
+            _fit_state['size'] = None
+            _fit_preview_to_window()
+        except Exception:
+            pass
 
     def set_view(mode):
         """单选按钮手动切换视图"""
@@ -3104,7 +3172,8 @@ def select_paths_gui() -> tuple:
                 except Exception:
                     pass
                 pv_placeholder_ids[st] = None
-            photo = make_preview_photoimage(root, img, max_w=315, max_h=205)
+            photo = make_preview_photoimage(root, img, max_w=pv_grid_canvas_w - 10,
+                                            max_h=max(80, pv_grid_canvas_h - 5))
             pv_state['photo_img'][st] = photo  # 保持引用防止被回收
             cv.itemconfig(pv_img_ids[st], image=photo)
             cap_lb.config(foreground='#1f3a5f' if checked else '#999999')
@@ -3114,7 +3183,8 @@ def select_paths_gui() -> tuple:
             pv_state['photo_img']['__single__'] = None
             pv_single_cv.itemconfig(pv_single_img_id, image='')
             return
-        photo = make_preview_photoimage(root, img, max_w=615, max_h=555)
+        photo = make_preview_photoimage(
+            root, img, max_w=pv_single_cv.winfo_width() - 10, max_h=pv_single_cv.winfo_height() - 10)
         pv_state['photo_img']['__single__'] = photo
         pv_single_cv.itemconfig(pv_single_img_id, image=photo)
 
@@ -3345,6 +3415,38 @@ def select_paths_gui() -> tuple:
     except Exception:
         style = None
 
+    # 主窗口全屏切换（⛶ 按钮 / F11）：进全屏时网格画布拉伸填满，退出还原
+    # （函数在此提前定义；pv_cells 等名字在调用时解析，届时已构建完成）
+    _normal_geom = {'value': None}
+
+    def _set_grid_canvas_size(new_w, new_h):
+        """统一设置全部视图 2xN 网格画布尺寸并居中图片/占位文字"""
+        nonlocal pv_grid_canvas_h, pv_grid_canvas_w
+        if new_w <= 0 or new_h <= 0:
+            return
+        pv_grid_canvas_w, pv_grid_canvas_h = new_w, new_h
+        for key, (cv, _cap) in pv_cells.items():
+            cv.configure(width=new_w, height=new_h)
+            cv.coords(pv_img_ids[key], new_w // 2, new_h // 2)
+            ph_id = pv_placeholder_ids.get(key)
+            if ph_id is not None:
+                cv.coords(ph_id, new_w // 2, new_h // 2)
+
+    def toggle_fullscreen():
+        """全屏/还原；内容自适应统一由 <Configure> 事件处理"""
+        try:
+            if root.attributes('-fullscreen'):
+                root.attributes('-fullscreen', False)
+                if _normal_geom['value']:
+                    root.geometry(_normal_geom['value'])
+            else:
+                _normal_geom['value'] = root.geometry()
+                root.attributes('-fullscreen', True)
+        except Exception as e:
+            print(f"  [全屏切换失败] {e}")
+
+    root.bind('<F11>', lambda e: toggle_fullscreen())
+
     # 标题区（深蓝现代风格）
     root.configure(bg='#f5f7fa')
     header = tk.Frame(root, bg='#1e3a5f')
@@ -3372,6 +3474,13 @@ def select_paths_gui() -> tuple:
                          cursor='hand2', padx=16, pady=5,
                          command=open_exif_viewer)
     btn_exif.pack(side='right')
+    # 全屏切换（⛶ 按钮或 F11 快捷键），toggle_fullscreen 在网格构建后定义
+    btn_full = tk.Button(title_row, text="⛶ 全屏", font=base_font,
+                         bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
+                         activeforeground='#ffffff', relief='flat', bd=0,
+                         cursor='hand2', padx=16, pady=5,
+                         command=toggle_fullscreen)
+    btn_full.pack(side='right')
     tk.Label(header, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
              bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
     gh_row = tk.Frame(header, bg='#1e3a5f')
@@ -3384,6 +3493,10 @@ def select_paths_gui() -> tuple:
 
     frame = tk.Frame(root, padx=24, pady=16, bg='#f5f7fa')
     frame.pack(fill='both', expand=True)
+    # 左列保持内容自然宽度，右列（预览面板）吃满剩余空间；行方向吃满高度
+    frame.rowconfigure(0, weight=1)
+    frame.columnconfigure(0, weight=0)
+    frame.columnconfigure(1, weight=1)
 
     # 左列：样式 + 照片选择 + 按钮
     left_col = tk.Frame(frame, bg='#f5f7fa')
@@ -3454,7 +3567,7 @@ def select_paths_gui() -> tuple:
 
     # 右列：实时预览面板（全部视图 2x2 网格 / 单个视图大图）
     pv_panel = ttk.LabelFrame(frame, text=" 实时预览 ", padding=10)
-    pv_panel.grid(row=0, column=1, sticky='n', padx=(14, 0))
+    pv_panel.grid(row=0, column=1, sticky='nsew', padx=(14, 0))
     # 视图切换（默认全部视图）+ 全屏按钮
     pv_view_var = tk.StringVar(value='全部视图')
     view_row = ttk.Frame(pv_panel)
@@ -3466,22 +3579,67 @@ def select_paths_gui() -> tuple:
     ttk.Button(view_row, text="⛶ 全屏", command=open_fullscreen, width=6).pack(
         side='right')
 
-    # ---- 全部视图：2x2 网格 ----
+    # ---- 全部视图：网格（画布高度自适应：默认全尺寸，屏幕放不下时才缩小）----
+    # 实测固定占用：标题栏+头部+面板到网格顶 ≈259px，每行图注/边距 ≈43px，底部 ≈10px
+    n_rows = (len(styles) + 1) // 2
+    full_h = 259 + n_rows * (210 + 43)
+    # 目标窗口高度 = 内容完整高度 与 屏幕可用高度 的较小值（小屏才压缩画布）
+    target_h = max(620, min(root.winfo_screenheight() - 40, full_h))
+    pv_grid_canvas_h = max(100, min(210, (target_h - 259) // n_rows - 43))
+    pv_grid_canvas_w = 320
     pv_grid_frame = tk.Frame(pv_panel, bg='#f5f7fa')
     pv_grid_frame.pack()
     for _i, (key, label, desc) in enumerate(styles):
         _row, _col = _i // 2, _i % 2
         _cell = ttk.Frame(pv_grid_frame)
         _cell.grid(row=_row, column=_col, padx=6, pady=4, sticky='n')
-        _cv = tk.Canvas(_cell, width=320, height=210, bg='#f5f6f8',
+        _cv = tk.Canvas(_cell, width=pv_grid_canvas_w, height=pv_grid_canvas_h, bg='#f5f6f8',
                         highlightthickness=1, highlightbackground='#d5dce8', bd=0)
         _cv.pack()
         _cap = ttk.Label(_cell, text=label, anchor='center')
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
-        pv_img_ids[key] = _cv.create_image(160, 105, image='')
+        pv_img_ids[key] = _cv.create_image(160, pv_grid_canvas_h // 2, image='')
         if not style_vars[key].get():
-            pv_placeholder_ids[key] = _cv.create_text(160, 105, text='未勾选', fill='#6e6e6e')
+            pv_placeholder_ids[key] = _cv.create_text(160, pv_grid_canvas_h // 2,
+                                                      text='未勾选', fill='#6e6e6e')
+
+    # ---- 预览区自适应窗口尺寸（自由缩放 / 全屏通用）----
+    # 预览区自适应：以预览面板的“实际”尺寸为准（自由缩放 / 全屏通用）
+    _fit_state = {'size': None, 'job': None}
+
+    def _fit_preview_to_window(event=None):
+        """按预览面板实际尺寸重算画布：全部视图均分 2 列 N 行，单个视图铺满"""
+        try:
+            pw = pv_panel.winfo_width()
+            ph = pv_panel.winfo_height()
+            if pw < 300 or ph < 200 or (pw, ph) == _fit_state['size']:
+                return
+            _fit_state['size'] = (pw, ph)
+            if pv_state['view'] == 'all':
+                # 面板内固定占用：视图切换行 ≈40px、底部说明 ≈25px、边距 ≈25px；
+                # 每行图注/画布边距 ≈43px
+                new_w = max(200, (pw - 44) // 2)
+                new_h = max(90, (ph - 90) // n_rows - 43)
+                _set_grid_canvas_size(new_w, new_h)
+            else:
+                # 单个视图：减去视图切换行、样式下拉行、底部说明与边距
+                new_w = max(320, pw - 30)
+                new_h = max(200, ph - 115)
+                pv_single_cv.configure(width=new_w, height=new_h)
+                pv_single_cv.coords(pv_single_img_id, new_w // 2, new_h // 2)
+            # 拖拽缩放期间 Configure 连续触发，重渲整组预览很重（大图 × 多样式）；
+            # 画布尺寸实时跟随，重渲只取「停止缩放 250ms 后」的最终尺寸
+            if _fit_state['job'] is not None:
+                root.after_cancel(_fit_state['job'])
+            _fit_state['job'] = root.after(250, lambda: (_fit_state.update(job=None),
+                                                         refresh_main_preview()))
+        except Exception as e:
+            print(f"  [内容自适应失败] {e}")
+
+    # 只绑面板：root 级绑定会因 bindtags 对每个子部件的 Configure 都触发一遍；
+    # 面板 sticky='nsew' 随窗口缩放必然触发 Configure，已覆盖所有时序
+    pv_panel.bind('<Configure>', _fit_preview_to_window)
 
     # ---- 单个视图：大图 + 样式下拉 ----
     pv_single_frame = tk.Frame(pv_panel)
@@ -3512,16 +3670,65 @@ def select_paths_gui() -> tuple:
         _apply_view('single')
     refresh_main_preview()
 
-    # 窗口居中显示：宽度/高度贴合内容（不留白）
+    # 窗口初始尺寸：内容自然大小（有下限），但高度不超过屏幕可用高度的 88%（小屏不超出）
+    # 窗口可自由拖拽缩放（resizable），内容自适应由 <Configure> 统一处理；
+    # 全屏（F11/⛶）与还原也都走同一条自适应链路
     root.update_idletasks()
-    w = max(root.winfo_reqwidth(), 1180)
-    h = max(root.winfo_reqheight(), 700)
-    x = (root.winfo_screenwidth() - w) // 2
-    y = (root.winfo_screenheight() - h) // 3
+    scr_w = root.winfo_screenwidth()
+    scr_h = root.winfo_screenheight()
+    w = min(max(root.winfo_reqwidth(), 1180), scr_w - 40)
+    h = min(max(root.winfo_reqheight(), 700), int(scr_h * 0.88))
+    x = max(0, (scr_w - w) // 2)
+    y = max(0, (scr_h - h) // 3)
+    # minsize 也不能超过屏幕可用大小，否则小屏/高缩放屏上窗口会被强制放大、
+    # 位置仍按较小尺寸居中 → 底部控件出屏且无法缩回
+    root.minsize(min(1000, max(640, scr_w - 40)), min(600, max(480, int(scr_h * 0.88))))
     root.geometry(f"{w}x{h}+{x}+{y}")
 
     root.mainloop()
     return result['paths'] or [], result['style'], result['brand']
+
+
+def render_cli_preview(
+    input_path,
+    style: str,
+    custom_text: str,
+    logo_path: str = '',
+    **kwargs,
+):
+    """
+    命令行 --preview 模式：渲染单张照片的水印效果，返回 PIL 图像（不保存文件）
+
+    读图/EXIF/旋转与批处理流程保持一致；渲染统一委托 apply_single_style，
+    保证预览效果与实际输出完全一致（此前手写 elif 分派漏掉 art/wordmark、
+    transparent 文字组装也和批处理不同，曾导致「预览看到的效果 ≠ 落盘效果」）。
+    """
+    # 读取图片（与 process_single_image / render_preview 一致：非 RGB 一律规范，
+    # 否则 LA/I;16 等模式会让部分样式抛 wrong-mode）
+    image = Image.open(input_path)
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # EXIF + 自动旋转
+    exif_data = read_exif(str(input_path))
+    orientation = exif_data.get('orientation', 1)
+    if orientation != 1:
+        image = auto_rotate_image(image, orientation)
+
+    return apply_single_style(image, style, exif_data, custom_text,
+                              logo_path=logo_path, **kwargs)
+
+
+def split_selected_paths(paths) -> tuple:
+    """
+    把一批选择的路径分流为 (文件列表, 文件夹列表)，各自排序。
+    不存在的路径两边都不进。GUI 多选可能混合「文件夹+照片」，
+    全按图片处理会逐个 IsADirectoryError 失败。
+    """
+    existing = [Path(p) for p in paths if p]
+    files = sorted([p for p in existing if p.is_file()])
+    dirs = sorted([p for p in existing if p.is_dir()])
+    return files, dirs
 
 
 def notify(title: str, message: str, is_error: bool = False):
@@ -3726,12 +3933,7 @@ def main():
             print(f"路径不存在: {m}")
         existing = [p for p in paths if p.exists()]
         if existing:
-            files = sorted([p for p in existing if p.is_file()])
-            dirs = sorted([p for p in existing if p.is_dir()])
-            if files:
-                multi_files = files
-            if dirs:
-                multi_dirs = dirs
+            multi_files, multi_dirs = split_selected_paths(existing)
 
     # 无有效输入 → 弹出图形界面选择照片/文件夹
     gui_brand = ''  # GUI中选择的强制品牌Logo（本次处理生效）
@@ -3755,11 +3957,14 @@ def main():
             print(f"已选择样式: {args.style}")
 
         if len(selected) == 1:
+            # 单选也要区分文件/文件夹：文件夹走批量流程
             input_path = Path(selected[0])
             print(f"已选择: {input_path}")
         else:
-            multi_files = selected
-            print(f"已选择 {len(multi_files)} 张照片")
+            # 多选可能混合文件夹与照片，必须分流，否则文件夹按图片处理逐个报错
+            multi_files, multi_dirs = split_selected_paths(selected)
+            n = len(multi_files) + len(multi_dirs)
+            print(f"已选择 {n} 个路径（{len(multi_files)} 张照片 / {len(multi_dirs)} 个文件夹）")
 
     # 拖拽/命令行传入多个路径且未显式指定样式 → 弹出样式选择窗口（跳过选图）
     total_inputs = (len(multi_files) if multi_files else 0) + (len(multi_dirs) if multi_dirs else 0)
@@ -3822,36 +4027,48 @@ def main():
         print(f"   模式: 预览（不保存）")
     print()
 
-    # 预览模式：只处理第一张图片并显示
-    if args.preview and input_path and input_path.is_file():
+    # 预览模式：只处理一张图片并显示
+    # 命令行/拖拽传入的路径在上方只写入 multi_files/multi_dirs（input_path 为 None），
+    # 这里把「恰好一个文件」的情况归一到 input_path，让 --preview 对 CLI 输入同样生效
+    if (args.preview and input_path is None
+            and multi_files and len(multi_files) == 1 and not multi_dirs):
+        input_path = multi_files[0]
+        multi_files = None
+
+    if args.preview and not (input_path and input_path.is_file()):
+        # 明确报错而不是继续批量落盘：预览模式的承诺就是「不保存文件」
+        notify("预览失败", "预览模式仅支持单张照片，请只传入/选择一张图片后重试",
+               is_error=True)
+        sys.exit(1)
+
+    if args.preview:
         print("预览模式：显示效果但不保存")
 
+        # 多样式组合（如 GUI 勾选多种 / --style "strip,border"）只渲染第一种
+        style = args.style.split(',')[0].strip()
+        if style != args.style:
+            print(f"  [预览] 预览仅渲染第一种样式: {style}")
+
         # 智能样式选择
-        style = args.style
         if SMART_STYLE == 'auto':
             style = get_smart_style(str(input_path))
             print(f"  智能样式: {style}（根据照片方向）")
 
-        # 读取图片
-        image = Image.open(input_path)
-        if image.mode in ('RGBA', 'P'):
-            image = image.convert('RGB')
-        exif_data = read_exif(str(input_path))
-        orientation = exif_data.get('orientation', 1)
-        if orientation != 1:
-            image = auto_rotate_image(image, orientation)
-
-        # 应用水印
-        if style == 'strip':
-            result = apply_white_border(image, exif_data, args.text, logo_path=args.logo)
-        elif style == 'transparent':
-            result = apply_transparent_watermark(image, args.text or format_exif_text(exif_data), **kwargs)
-        elif style == 'border':
-            result = apply_color_border(image, exif_data, args.text, **kwargs)
-        elif style == 'blur':
-            result = apply_blur_border(image, exif_data, args.text, **kwargs)
+        # 统一渲染入口：委托 apply_single_style，预览与实际输出保证一致；
+        # 只传 CLI 真正支持的参数，其余用各样式全局配置默认值
+        result = render_cli_preview(
+            input_path, style, args.text,
+            logo_path=args.logo,
+            position=args.position,
+            border_color=border_color,
+            text_color=text_color,
+            opacity=args.opacity,
+        )
 
         # 显示预览
+        if result is None:
+            notify("预览失败", f"无法预览: {input_path.name}", is_error=True)
+            sys.exit(1)
         result.show()
         print("预览窗口已打开，关闭后程序继续")
         sys.exit(0)
@@ -3859,6 +4076,14 @@ def main():
     # ========== 处理循环 ==========
     # GUI选择模式下处理完不退出，自动回到选择窗口继续用；命令行/拖拽模式处理一次后退出
     while True:
+        if not input_path and not multi_files and not multi_dirs:
+            # 选中的路径可能已全部失效（如选择后被删除/移动）：
+            # split_selected_paths 会把不存在的路径静默丢弃，这里兜底避免
+            # 落到 input_path.is_file() 上抛 AttributeError 崩溃
+            notify("错误", "所选路径均无效（可能已被删除或移动）", is_error=True)
+            if not gui_mode:
+                sys.exit(1)
+            break
         if multi_files or multi_dirs:
             # 多文件/多文件夹处理（图形界面多选或拖拽传入）
             total_success = 0
@@ -3996,16 +4221,21 @@ def main():
             break
         if selected_style:
             args.style = selected_style
+        # 品牌要无条件更新：选「自动」(空值) 时恢复自动识别，
+        # 否则上一轮的强制品牌会永久粘滞；同时回落到命令行 --logo（如有）
+        kwargs['logo_path'] = selected_brand or args.logo
         if selected_brand:
-            kwargs['logo_path'] = selected_brand  # 本次处理强制品牌Logo
+            print(f"强制品牌Logo: {selected_brand}")
         if len(selected) == 1:
             input_path = Path(selected[0])
             multi_files = None
+            multi_dirs = None
             print(f"已选择: {input_path}")
         else:
-            multi_files = selected
             input_path = None
-            print(f"已选择 {len(multi_files)} 张照片")
+            multi_files, multi_dirs = split_selected_paths(selected)
+            n = len(multi_files) + len(multi_dirs)
+            print(f"已选择 {n} 个路径（{len(multi_files)} 张照片 / {len(multi_dirs)} 个文件夹）")
 
     # exe命令行模式：等待用户确认（隐藏控制台时用弹窗提示完成）
     if getattr(sys, 'frozen', False) and not gui_mode:

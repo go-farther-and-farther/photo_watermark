@@ -28,7 +28,7 @@ from pathlib import Path
 
 # 常用 EXIF 字段（ExifTool 参数顺序即输出顺序，可读性友好）
 _EXIFTOOL_FIELDS = [
-    '-Model', '-ShutterCount', '-LensModel', '-LensID',
+    '-Make', '-Model', '-ShutterCount', '-LensModel', '-LensID',
     '-ExposureTime', '-FNumber', '-ISO', '-FocalLength', '-CreateDate',
 ]
 
@@ -247,7 +247,7 @@ def _read_with_exiftool(path, exe):
 
     stderr = proc.stderr.decode('utf-8', errors='replace').strip()
     has_tags = any(k in entry for k in
-                   ('Model', 'ShutterCount', 'LensModel', 'LensID', 'ExposureTime',
+                   ('Make', 'Model', 'ShutterCount', 'LensModel', 'LensID', 'ExposureTime',
                     'FNumber', 'ISO', 'FocalLength', 'CreateDate'))
     if not has_tags:
         # 合法图片但确实没有 EXIF（如截图/纯导出 JPEG）→ 成功但字段为空
