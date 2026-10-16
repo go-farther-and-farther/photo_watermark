@@ -3458,6 +3458,20 @@ def select_paths_gui() -> tuple:
         except Exception as e:  # noqa: BLE001
             notify("打开 EXIF 查看器失败", str(e), is_error=True)
 
+    def open_sr_tool():
+        """打开多帧超分合成窗口（连拍分组版；cv2/rawpy 依赖重，点开时才导入）"""
+        try:
+            from sr_gui import open_sr_window
+        except ImportError as e:
+            notify("超分工具不可用",
+                   "sr_gui 模块加载失败，需安装 rawpy/opencv-python/tifffile/piexif:\n" + str(e),
+                   is_error=True)
+            return
+        try:
+            open_sr_window(root)
+        except Exception as e:  # noqa: BLE001
+            notify("打开超分工具失败", str(e), is_error=True)
+
     # ========== 界面布局 ==========
     from tkinter import ttk
 
@@ -3535,6 +3549,13 @@ def select_paths_gui() -> tuple:
                          cursor='hand2', padx=16, pady=5,
                          command=open_exif_viewer)
     btn_exif.pack(side='right')
+    # 多帧超分合成（连拍分组版）：独立窗口，与 EXIF 按钮并列
+    btn_sr = tk.Button(title_row, text="🔬 超分", font=base_font,
+                       bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
+                       activeforeground='#ffffff', relief='flat', bd=0,
+                       cursor='hand2', padx=16, pady=5,
+                       command=open_sr_tool)
+    btn_sr.pack(side='right')
     # 全屏切换（⛶ 按钮或 F11 快捷键），toggle_fullscreen 在网格构建后定义
     btn_full = tk.Button(title_row, text="⛶ 全屏", font=base_font,
                          bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',

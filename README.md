@@ -15,6 +15,13 @@
   - 双击行查看完整信息；坏文件标红不中断
   - 解析引擎自动选择：内置 ExifTool → 系统安装的 ExifTool → exifread 回退
 
+- **多帧超分合成（连拍分组版）**
+  - 主窗口标题栏「🔬 超分」按钮打开独立窗口，也可单独运行 `python sr_gui.py`
+  - 选择 RAW 连拍文件夹 → 自动按拍摄时间分组 → 每组按清晰度选最锐的帧 → 对齐（平移+旋转+光度校正）→ SR 网格鲁棒融合，输出 16-bit TIFF 调色母版 + JPG 预览（带完整 EXIF）
+  - 手持连拍 16-25 张、每帧有自然亚像素位移时，可合成出真实细节超过单帧的超分图
+  - 可选依赖：`rawpy`、`opencv-python`、`tifffile`、`piexif`（仅超分功能需要，缺了不影响水印和 EXIF 功能）
+  - 算法细节见 [docs/super_res/README.md](docs/super_res/README.md)
+
 - **自动匹配品牌Logo**
   - 根据相机品牌自动选择对应Logo
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
@@ -196,6 +203,23 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 | `--opacity` | 半透明水印的透明度（0-255） | `config.py` 配置 |
 | `--quality` | JPEG输出质量（1-100） | `config.py` 配置 |
 | `--logo` | 自定义Logo图片路径 | 自动匹配品牌 |
+
+### 多帧超分（可选功能）
+
+超分是独立工具，不经过水印管线，有自己的命令行入口：
+
+```bash
+# 安装可选依赖（水印功能不需要）
+pip install rawpy opencv-python numpy tifffile exifread piexif
+
+# 单组合成：指定连拍文件夹
+python sr_process.py --input ./raw_burst/ --output result.tif --scale 2
+
+# 批量：整个文件夹自动按拍摄时间分成多组连拍，逐组合成（GUI 同款逻辑）
+python sr_gui.py
+```
+
+详细参数与算法说明见 [docs/super_res/README.md](docs/super_res/README.md)。
 
 ## 支持的品牌
 

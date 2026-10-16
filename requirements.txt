@@ -1,3 +1,10 @@
 Pillow>=10.0.0
 exifread>=3.0.0
 tkinterdnd2>=0.4.0
+
+# ---- 多帧超分（可选，仅「🔬 超分」功能需要；不装不影响水印/EXIF/压缩）----
+rawpy>=0.24
+opencv-python>=4.8
+numpy>=1.24
+tifffile>=2023.1
+piexif>=1.1

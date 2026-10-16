@@ -1,0 +1,95 @@
+# -*- coding: utf-8 -*-
+"""多帧超分（super_res 系列）集成测试
+
+用合成 JPG 连拍（已知亚像素位移）验证：
+1) align.estimate_shift 的位移估计精度（warp 平移 t → 估计 ≈ t）
+2) sr_process.process 端到端：输出 JPG/TIFF 存在、尺寸约 2 倍、非平凡内容
+
+RAW 分支（rawpy）与连拍分组（burst_tools，需真实 RAW 的 EXIF 时间）不做单测。
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+cv2 = pytest.importorskip("cv2")
+tifffile = pytest.importorskip("tifffile")
+
+from align import estimate_shift  # noqa: E402
+import sr_process  # noqa: E402
+
+
+def _base_image(w=320, h=240, seed=7):
+    """高密集纹理的合成图：相位相关需要丰富的高频信息"""
+    rng = np.random.default_rng(seed)
+    x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    base = 0.5 + 0.25 * np.sin(x * 0.31 + y * 0.17) + 0.15 * np.sin(x * 0.83 - y * 0.51)
+    base += rng.normal(0, 0.02, base.shape)
+    img = np.stack([np.clip(base, 0.05, 0.95)] * 3, axis=2).astype(np.float32)
+    return img
+
+
+def _warp(img, dx, dy):
+    h, w = img.shape[:2]
+    M = np.float32([[1, 0, dx], [0, 1, dy]])
+    return cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC,
+                          borderMode=cv2.BORDER_REFLECT_101)
+
+
+class TestEstimateShift:
+    def test_subpixel_shift_recovered(self):
+        img = _base_image()
+        shifted = _warp(img, 1.7, -0.9)
+        dx, dy, resp = estimate_shift(img[:, :, 0], shifted[:, :, 0])
+        assert abs(dx - 1.7) < 0.25
+        assert abs(dy + 0.9) < 0.25
+        assert resp > 0.5
+
+    def test_zero_shift(self):
+        img = _base_image()
+        dx, dy, resp = estimate_shift(img[:, :, 0], img[:, :, 0])
+        assert abs(dx) < 0.25 and abs(dy) < 0.25
+
+
+class TestProcess:
+    def test_jpg_burst_end_to_end(self, tmp_path):
+        burst = tmp_path / "burst"
+        burst.mkdir()
+        shifts = [(0.0, 0.0), (0.35, 0.6), (0.7, 0.1), (1.2, 1.5), (-0.5, 0.8), (0.2, -0.7)]
+        img = _base_image()
+        for i, (dx, dy) in enumerate(shifts):
+            frame = (np.clip(_warp(img, dx, dy), 0, 1) * 255).astype(np.uint8)
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            assert ok
+            (burst / f"frame_{i:02d}.jpg").write_bytes(buf.tobytes())
+
+        out_base = tmp_path / "result"
+        sr_process.process(
+            str(burst), str(out_base) + '.tif',
+            scale=2, max_frames=6, max_shift=50.0,
+            use_deghost=True, sharpen=0.0, use_denoise=False,
+        )
+
+        # 全尺寸 TIF：存在、约 2 倍尺寸（重叠区裁掉位移跨距）、3 通道
+        tif = tmp_path / "result.tif"
+        assert tif.exists()
+        arr = tifffile.imread(str(tif))
+        h, w = img.shape[:2]
+        out_h, out_w = arr.shape[:2]
+        assert arr.ndim == 3 and arr.shape[2] == 3
+        assert 2 * h - 12 <= out_h <= 2 * h
+        assert 2 * w - 12 <= out_w <= 2 * w
+        # 非平凡内容：不是全黑/全白
+        assert float(arr.std()) > 1000.0
+
+        # JPG 预览：存在、可解码、与 TIF 同尺寸
+        jpg = tmp_path / "result_2x.jpg"
+        assert jpg.exists()
+        jimg = cv2.imread(str(jpg))
+        assert jimg is not None
+        assert (jimg.shape[0], jimg.shape[1]) == (out_h, out_w)
