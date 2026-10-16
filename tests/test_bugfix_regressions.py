@@ -153,7 +153,7 @@ def _build_startup_project(tmp_path, user_ini_lines):
     而磁盘上的真实文件内容不受此限制。"""
     proj = tmp_path / "_startup_proj"
     proj.mkdir(exist_ok=True)
-    for fname in ("photo_watermark.py", "config.py", "水印设置.ini"):
+    for fname in ("photo_watermark.py", "compressor.py", "config.py", "水印设置.ini"):
         src = PROJECT_ROOT / fname
         if src.exists():
             shutil.copy(src, proj / fname)

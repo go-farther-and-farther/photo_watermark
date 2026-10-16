@@ -37,6 +37,12 @@ try:
 except ImportError:
     open_exif_window = None
 
+# 压缩/转换核心（「无水印(仅压缩)」样式的后端），与主程序解耦
+from compressor import (
+    resize_image, flatten_to_rgb, encode_jpeg_bytes, encode_to_target_size,
+    write_atomic, sanitize_subfolder, save_metadata_sidecar,
+)
+
 
 # 控制台输出容错：避免中文环境下重定向输出时因编码崩溃（如 © 等字符）
 if hasattr(sys.stdout, 'reconfigure'):
@@ -283,6 +289,11 @@ ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', True, 'bool')
 WORDMARK_RATIO = get_config_value('官方字标', '字标大小', 0.04, 'float')
 WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', '白色'))
 WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', True, 'bool')
+
+# 压缩/转换设置（「无水印(仅压缩)」样式；最大边长对所有样式生效）
+COMPRESS_MAX_EDGE = get_config_value('压缩设置', '最大边长', COMPRESS_MAX_EDGE if 'COMPRESS_MAX_EDGE' in dir() else 0, 'int')
+COMPRESS_TARGET_MB = get_config_value('压缩设置', '目标体积MB', COMPRESS_TARGET_MB if 'COMPRESS_TARGET_MB' in dir() else 0, 'float')
+COMPRESS_SUBFOLDER = get_config_value('压缩设置', '压缩输出子文件夹', COMPRESS_SUBFOLDER if 'COMPRESS_SUBFOLDER' in dir() else 'JPEG')
 
 # 智能样式（'auto'=按照片方向自动选样式，'off'=固定用默认样式）
 SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', SMART_STYLE if 'SMART_STYLE' in dir() else False, 'bool') else 'off'
@@ -765,52 +776,6 @@ def create_frame_canvas(size: Tuple[int, int], base_color: Tuple[int, int, int])
         except Exception as e:
             print(f"  [警告] 背景图加载失败: {e}，使用纯色背景")
     return canvas
-
-
-def get_params_text(exif_data: Dict[str, str]) -> str:
-    """
-    提取拍摄参数文本（焦距 光圈 快门 ISO）
-
-    Args:
-        exif_data: EXIF数据字典
-
-    Returns:
-        参数文本，如 "120mm F5.6 1/125s ISO1100"
-    """
-    params = []
-    for key in ['focal_length', 'aperture', 'shutter', 'iso']:
-        if exif_data.get(key):
-            params.append(exif_data[key])
-    return ' '.join(params)
-
-
-def format_exif_text(exif_data: Dict[str, str], show_all: bool = False) -> str:
-    """
-    格式化EXIF信息为显示文本
-
-    Args:
-        exif_data: EXIF数据字典
-        show_all: 是否显示所有信息
-
-    Returns:
-        格式化后的文本
-    """
-    parts = []
-
-    # 相机型号
-    if exif_data.get('camera'):
-        parts.append(exif_data['camera'])
-
-    # 拍摄参数
-    params_text = get_params_text(exif_data)
-    if params_text:
-        parts.append(params_text)
-
-    # 拍摄时间
-    if show_all and exif_data.get('datetime'):
-        parts.append(exif_data['datetime'])
-
-    return '  -  '.join(parts) if parts else ''
 
 
 def trim_logo_margins(logo: Image.Image) -> Image.Image:
@@ -1705,6 +1670,9 @@ def apply_single_style(image, style, exif_data, custom_text, logo_path, **kwargs
             text_color=kwargs.get('text_color', None),
             text_shadow=kwargs.get('text_shadow', None),
         )
+    elif style == 'none':
+        # 无水印(仅压缩)：原图直通，缩放/编码策略由 process_single_image 的输出分支处理
+        return image
     else:
         print(f"  [警告] 未知样式: {style}")
         return image
@@ -1728,8 +1696,8 @@ def process_single_image(
     output_path: str,
     style: str = 'strip',
     custom_text: str = '',
-    **kwargs,
-) -> bool:
+        **kwargs,
+    ) -> str:
     """
     处理单张图片
 
@@ -1741,7 +1709,8 @@ def process_single_image(
         **kwargs: 其他参数
 
     Returns:
-        'ok' - 处理成功；'skipped' - 输出文件已存在被跳过；'failed' - 处理失败
+        'ok' - 处理成功；'failed' - 处理失败（输出重名时不跳过，
+        自动追加 _2/_3 生成唯一文件名，见 unique_output_path）
     """
     try:
         # 读取图片
@@ -1752,10 +1721,14 @@ def process_single_image(
             print(f"  [警告] 图片尺寸过小，跳过: {image.width}x{image.height}")
             return 'failed'
 
-        # 确保是RGB模式（覆盖 RGBA/P 及灰度带透明 LA、16位灰度 I;16 等：
-        # 这些模式会让 blur/art/wordmark 样式抛 wrong-mode 或无法保存 JPEG）
+        # 原始元数据（无水印压缩输出需保留 EXIF/ICC/PNG 工作流，convert 后不保证还在）
+        raw_info = dict(image.info)
+
+        # 确保是RGB模式（带透明的 RGBA/LA/P 先合成白底，避免 JPEG 丢 alpha 后透明区域异常；
+        # 覆盖 P 及灰度带透明 LA、16位灰度 I;16 等：这些模式会让 blur/art/wordmark
+        # 样式抛 wrong-mode 或无法保存 JPEG）
         if image.mode != 'RGB':
-            image = image.convert('RGB')
+            image = flatten_to_rgb(image)
 
         # 读取EXIF信息
         exif_data = read_exif(input_path)
@@ -1765,6 +1738,14 @@ def process_single_image(
         if orientation != 1:
             image = auto_rotate_image(image, orientation)
             print(f"  图片已自动旋转 (方向: {orientation})")
+
+        # 通用缩放（对所有样式生效；先缩放再画水印，保证边框比例正确，只缩不放）
+        if COMPRESS_MAX_EDGE > 0:
+            resized = resize_image(image, COMPRESS_MAX_EDGE)
+            if resized is not image:
+                print(f"  已缩放: {image.width}x{image.height} -> "
+                      f"{resized.width}x{resized.height}（最大边长 {COMPRESS_MAX_EDGE}）")
+                image = resized
 
         # 自动选择Logo（根据相机品牌）
         logo_path = kwargs.get('logo_path', '')
@@ -1814,10 +1795,17 @@ def process_single_image(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_ext = Path(output_path).suffix
 
-        processed_count = 0
         for i, single_style in enumerate(styles):
             # 为每个样式生成独立的文件名
-            if len(styles) > 1 or force_name:
+            if single_style == 'none':
+                # 无水印(仅压缩)：输出到源图旁的压缩子文件夹，保持原文件名
+                # （派生文件，重跑直接覆盖，不走 unique_output_path）
+                subfolder = sanitize_subfolder(COMPRESS_SUBFOLDER)
+                none_out_dir = Path(input_path).parent / subfolder
+                none_out_dir.mkdir(parents=True, exist_ok=True)
+                style_output_path = none_out_dir / f"{Path(input_path).stem}.jpg"
+                print(f"  应用样式 [{i+1}/{len(styles)}]: 无水印(仅压缩)")
+            elif len(styles) > 1 or force_name:
                 # 多样式/智能样式切换时，文件名包含实际样式名
                 style_output_name = OUTPUT_FILENAME_FORMAT.format(
                     name=Path(input_path).stem,
@@ -1830,18 +1818,45 @@ def process_single_image(
                 style_output_path = output_path
 
             # 文件已存在时自动追加 _2、_3… 生成唯一文件名（除非显式开启覆盖）
+            # （无水印输出例外：直接覆盖旧输出，保证重跑幂等）
             style_output_path = Path(style_output_path)
-            if not OVERWRITE_EXISTING and style_output_path.exists():
+            if single_style != 'none' and not OVERWRITE_EXISTING and style_output_path.exists():
                 style_output_path = unique_output_path(style_output_path)
                 print(f"    [唯一] 原文件已存在，改用新文件名: {style_output_path.name}")
-
-            processed_count += 1
 
             # 应用样式（每次都从原图开始，不叠加）
             result = apply_single_style(image, single_style, exif_data, custom_text, logo_path, **kwargs_clean)
 
             # 保存图片
-            if output_ext.lower() in ('.jpg', '.jpeg'):
+            if single_style == 'none':
+                # 无水印：编码到内存（先知道大小再决定落盘），保留 EXIF/ICC
+                exif_bytes = raw_info.get('exif', b'')
+                icc_profile = raw_info.get('icc_profile')
+                if COMPRESS_TARGET_MB > 0:
+                    data, used_q, met = encode_to_target_size(
+                        result, COMPRESS_TARGET_MB, exif=exif_bytes, icc=icc_profile)
+                    if met:
+                        print(f"    目标体积 {COMPRESS_TARGET_MB:g}MB：质量{used_q}，"
+                              f"实际 {len(data)/1048576:.1f}MB")
+                    else:
+                        print(f"    [提示] 无法压到目标 {COMPRESS_TARGET_MB:g}MB，"
+                              f"已按质量{used_q}输出（{len(data)/1048576:.1f}MB）")
+                else:
+                    data = encode_jpeg_bytes(
+                        result, kwargs.get('quality', JPEG_QUALITY) or JPEG_QUALITY,
+                        exif=exif_bytes, icc=icc_profile)
+                # 压缩后不小于原文件：跳过（源图不动，避免派生文件比源还大）
+                src_size = Path(input_path).stat().st_size
+                if len(data) >= src_size:
+                    print(f"    [跳过] 压缩后不小于原文件"
+                          f"（{len(data)/1024:.0f}KB >= {src_size/1024:.0f}KB），不输出")
+                    continue
+                # PNG 工作流元数据（ComfyUI 等）随输出存 sidecar
+                save_metadata_sidecar(raw_info, none_out_dir, Path(input_path).stem)
+                write_atomic(data, style_output_path)
+                print(f"    -> 保存到: {subfolder}/{style_output_path.name}"
+                      f"（{src_size/1048576:.1f}MB -> {len(data)/1048576:.1f}MB）")
+            elif output_ext.lower() in ('.jpg', '.jpeg'):
                 result.save(str(style_output_path), 'JPEG',
                             quality=kwargs.get('quality', JPEG_QUALITY),
                             subsampling=kwargs.get('subsampling', JPEG_SUBSAMPLING))
@@ -1850,10 +1865,9 @@ def process_single_image(
             else:
                 result.save(str(style_output_path))
 
-            print(f"    -> 保存到: {style_output_path.name}")
+            if single_style != 'none':  # none 分支已带体积信息打印过
+                print(f"    -> 保存到: {style_output_path.name}")
 
-        if processed_count == 0:
-            return 'skipped'
         return 'ok'
 
     except Image.DecompressionBombError:
@@ -1882,7 +1896,7 @@ def batch_process(
         **kwargs: 其他参数
 
     Returns:
-        (成功数量, 跳过数量, 总数量, 用时秒数)
+        (成功数量, 总数量, 用时秒数)
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -1914,7 +1928,6 @@ def batch_process(
         use_progress_bar = False
 
     success_count = 0
-    skipped_count = 0
     start_time = datetime.now()
 
     # 解析样式列表（移到循环外，避免重复解析）
@@ -1943,8 +1956,6 @@ def batch_process(
         )
         if status == 'ok':
             success_count += 1
-        elif status == 'skipped':
-            skipped_count += 1
         else:
             if not use_progress_bar:
                 print(f"  -> 处理失败")
@@ -1952,7 +1963,7 @@ def batch_process(
     # 计算用时
     elapsed_time = (datetime.now() - start_time).total_seconds()
 
-    return success_count, skipped_count, len(image_files), elapsed_time
+    return success_count, len(image_files), elapsed_time
 
 
 def get_smart_style(image_path: str) -> str:
@@ -2057,7 +2068,7 @@ def refresh_globals_from_ini():
         BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO, \
         ART_FONT_PATH, ART_FONT_RATIO, ART_PARAMS_RATIO, ART_TEXT_COLOR, ART_TEXT_SHADOW, \
         WORDMARK_RATIO, WORDMARK_TEXT_COLOR, WORDMARK_TEXT_SHADOW, \
-        BORDER_HEIGHT_RATIO
+        BORDER_HEIGHT_RATIO, COMPRESS_MAX_EDGE, COMPRESS_TARGET_MB, COMPRESS_SUBFOLDER
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
@@ -2084,6 +2095,9 @@ def refresh_globals_from_ini():
     WORDMARK_RATIO = get_config_value('官方字标', '字标大小', WORDMARK_RATIO, 'float')
     WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', '白色'))
     WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', WORDMARK_TEXT_SHADOW, 'bool')
+    COMPRESS_MAX_EDGE = get_config_value('压缩设置', '最大边长', COMPRESS_MAX_EDGE, 'int')
+    COMPRESS_TARGET_MB = get_config_value('压缩设置', '目标体积MB', COMPRESS_TARGET_MB, 'float')
+    COMPRESS_SUBFOLDER = get_config_value('压缩设置', '压缩输出子文件夹', COMPRESS_SUBFOLDER)
     _art_font_cache.clear()  # 字体可能变了，清缓存
 
 
@@ -2183,7 +2197,7 @@ def render_preview(
                 logo_path = get_logo_by_brand(exif_data['brand'])
 
             # 5. 渲染指定样式（预览按所选样式原样渲染，不做智能样式替换，
-            #    让用户能直观对比四种样式的差异）
+            #    让用户能直观对比各样式的差异）
             if not styles:
                 return None
             result = apply_single_style(image, styles[0], exif_data, custom_text, logo_path)
@@ -2320,12 +2334,36 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     v_wm_color = tk.StringVar(value=color_to_name(WORDMARK_TEXT_COLOR))
     v_wm_shadow = tk.BooleanVar(value=bool(WORDMARK_TEXT_SHADOW))
 
+    # 压缩/转换（无水印样式）设置
+    _edge_map = {0: '保持原尺寸', 7680: '8K (7680)', 3840: '4K (3840)', 2560: '2K (2560)'}
+    _edge_rev = {v: k for k, v in _edge_map.items()}
+    v_max_edge = tk.StringVar(value=_edge_map.get(COMPRESS_MAX_EDGE, str(COMPRESS_MAX_EDGE)))
+    v_target_mb = tk.StringVar(value='%g' % COMPRESS_TARGET_MB)
+    v_subfolder = tk.StringVar(value=COMPRESS_SUBFOLDER)
+
+    def _parse_max_edge(s: str) -> int:
+        """「最大边长」显示值 -> 像素数：档位名查表，数字直读，非法回退 0（保持原尺寸）"""
+        s = (s or '').strip()
+        if s in _edge_rev:
+            return _edge_rev[s]
+        try:
+            return max(0, int(float(s)))
+        except ValueError:
+            return 0
+
+    def _parse_target_mb(s: str) -> float:
+        """「目标体积」文本 -> MB 数：非法或负数回退 0（关闭）"""
+        try:
+            return max(0.0, float(s))
+        except ValueError:
+            return 0.0
+
     # ===== 实时预览（嵌入设置窗口右侧） =====
     # 默认预览样式：主窗口勾选的第一个，否则用全局默认样式
     preview_state = {
         'seq': 0,
         'photo': preview_photo or get_demo_photo(),
-        'styles': [k for k, _, _ in STYLE_OPTIONS],  # 固定渲染四种样式（2x2 网格）
+        'styles': [k for k, _, _ in STYLE_OPTIONS],  # 固定渲染全部样式（2 列网格）
         'photo_img': {},   # style -> PhotoImage 保持引用
         'pending': None,   # 防抖用的 after id
     }
@@ -2518,6 +2556,10 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             v_bg_alpha.set(gd('基础设置', '边框背景图透明度', 128, int))
             v_quality.set(gd('基础设置', 'JPEG质量', 98, int))
             v_sub_display.set(_sub_map.get(gd('基础设置', 'JPEG色度采样', 0, int), _sub_map[0]))
+            _edge_def = gd('压缩设置', '最大边长', 0, int)
+            v_max_edge.set(_edge_map.get(_edge_def, str(_edge_def)))
+            v_target_mb.set('%g' % gd('压缩设置', '目标体积MB', 0, float))
+            v_subfolder.set(gd('压缩设置', '压缩输出子文件夹', 'JPEG'))
             v_auto.set(str(gd('基础设置', '自动打开输出', '否')).lower() in ('是', 'yes', 'true', '1'))
             v_console.set(str(gd('基础设置', '显示控制台窗口', '否')).lower() in ('是', 'yes', 'true', '1'))
             v_smart.set(str(gd('智能样式', '启用智能样式', '是')).lower() in ('是', 'yes', 'true', '1'))
@@ -2551,6 +2593,9 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             ('基础设置', '边框背景图透明度', str(v_bg_alpha.get())),
             ('基础设置', 'JPEG质量', str(v_quality.get())),
             ('基础设置', 'JPEG色度采样', str(_sub_rev.get(v_sub_display.get(), 0))),
+            ('压缩设置', '最大边长', str(_parse_max_edge(v_max_edge.get()))),
+            ('压缩设置', '目标体积MB', '%g' % _parse_target_mb(v_target_mb.get())),
+            ('压缩设置', '压缩输出子文件夹', v_subfolder.get().strip() or 'JPEG'),
             ('基础设置', '自动打开输出', '是' if v_auto.get() else '否'),
             ('基础设置', '显示控制台窗口', '是' if v_console.get() else '否'),
             ('智能样式', '启用智能样式', '是' if v_smart.get() else '否'),
@@ -2671,8 +2716,22 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
                           state='readonly', width=22)
     cb_sub.grid(row=2, column=1, columnspan=2, sticky='ew', pady=5)
     ToolTip(cb_sub, "JPEG色彩采样方式（越靠前画质越好、文件越大）：\n最高质量(文件最大) = 4:4:4，适合摄影\n平衡(推荐) = 4:2:2\n文件较小 = 4:2:0，适合网络分享")
+    ttk.Label(g3, text="最大边长:").grid(row=3, column=0, sticky='w', pady=5)
+    cb_edge = ttk.Combobox(g3, textvariable=v_max_edge,
+                           values=[_edge_map[k] for k in (0, 7680, 3840, 2560)],
+                           width=22)
+    cb_edge.grid(row=3, column=1, columnspan=2, sticky='ew', pady=5)
+    ToolTip(cb_edge, "输出图片长边的最大像素（只缩不放，对所有样式生效）：\n保持原尺寸 = 不缩放，只压体积（默认）\n8K/4K/2K = 长边超过档位时等比缩小\n也可直接输入自定义像素数（如 5120）\n12K 游戏截图压到 4K 后体积约为原来的 1/9")
+    ttk.Label(g3, text="目标体积(MB):").grid(row=4, column=0, sticky='w', pady=5)
+    e_target = ttk.Entry(g3, textvariable=v_target_mb, width=24)
+    e_target.grid(row=4, column=1, columnspan=2, sticky='ew', pady=5)
+    ToolTip(e_target, "「无水印(仅压缩)」输出的目标文件大小：\n自动调整 JPEG 质量使文件不超过该值（范围 30-95）。\n0 = 关闭（默认），按「JPEG质量」的数值输出。\n仅对无水印输出生效，加水印输出不受影响。")
+    ttk.Label(g3, text="压缩输出子文件夹:").grid(row=5, column=0, sticky='w', pady=5)
+    e_subfolder = ttk.Entry(g3, textvariable=v_subfolder, width=24)
+    e_subfolder.grid(row=5, column=1, columnspan=2, sticky='ew', pady=5)
+    ToolTip(e_subfolder, "勾选「无水印(仅压缩)」时，输出到源图旁的这个子文件夹\n（文件名保持原名，源图不动）。默认 JPEG。\n文件夹名中的非法字符会自动清除。")
     cb_auto = ttk.Checkbutton(g3, text="处理完自动打开输出文件夹", variable=v_auto)
-    cb_auto.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
+    cb_auto.grid(row=6, column=0, columnspan=3, sticky='w', pady=5)
     ToolTip(cb_auto, "处理完成后自动用资源管理器打开输出文件夹。\n默认关闭，需要时勾选。")
 
     # 组4：其他
@@ -2779,8 +2838,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     cb_wm_shadow = ttk.Checkbutton(f_wm, text="柔和阴影（推荐开，白字更清晰）", variable=v_wm_shadow)
     cb_wm_shadow.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
 
-    # ===== 右侧：实时预览（2x2 网格，四种样式同步更新） =====
-    f5 = ttk.LabelFrame(outer, text=" 实时预览（五种样式同步更新） ", padding=8)
+    # ===== 右侧：实时预览（2 列网格，全部样式同步更新） =====
+    f5 = ttk.LabelFrame(outer, text=" 实时预览（六种样式同步更新） ", padding=8)
     f5.grid(row=0, column=1, sticky='ns')
     pv_cells = {}     # style -> (canvas, caption_label)
     pv_img_ids = {}   # style -> canvas item id
@@ -2797,7 +2856,7 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
         _cap.pack(fill='x')
         pv_cells[key] = (_cv, _cap)
         pv_img_ids[key] = _cv.create_image(102, 70, image='')
-    ttk.Label(f5, text="调整滑杆、颜色、位置或签名，\n五种样式会同步更新（保存后生效）",
+    ttk.Label(f5, text="调整滑杆、颜色、位置或签名，\n六种样式会同步更新（保存后生效）",
               foreground='#666666').pack(anchor='w', pady=(6, 0))
 
     # ===== 底部按钮 =====
@@ -2842,6 +2901,7 @@ STYLE_OPTIONS = [
     ('blur', '模糊边框', '边缘模糊背景，效果自然'),
     ('art', '艺术字体', '品牌艺术字+参数，叠加照片底部（字体可自定义）'),
     ('wordmark', '官方LOGO', '品牌官方LOGO字标+机型+参数，叠加照片底部'),
+    ('none', '无水印(仅压缩)', '不加水印，压缩/转换输出 JPG 到子文件夹（游戏截图、批量减小体积）'),
 ]
 
 # 品牌选项（显示名, 配置值）；空值=自动识别EXIF品牌
@@ -3016,7 +3076,7 @@ def select_paths_gui() -> tuple:
     _brand_code = {n: c for n, c in BRAND_OPTIONS}
     brand_var = tk.StringVar(value='自动')
 
-    # ===== 右侧实时预览（全部视图 2x2 网格 / 单个视图大图） =====
+    # ===== 右侧实时预览（全部视图 2 列网格 / 单个视图大图） =====
     # photo_img: {style: PhotoImage} 保持引用；pending: 防抖 after id
     pv_state = {'seq': 0, 'photo': get_demo_photo(), 'photo_img': {}, 'pending': None,
                 'view': 'all', 'single_style': ''}
@@ -3451,10 +3511,11 @@ def select_paths_gui() -> tuple:
     root.configure(bg='#f5f7fa')
     header = tk.Frame(root, bg='#1e3a5f')
     header.pack(fill='x')
+    # fill='x' 必须有：否则标题行收缩到内容宽度，右侧按钮会挤在标题旁边而不是贴窗口右缘
     title_row = tk.Frame(header, bg='#1e3a5f')
-    title_row.pack(pady=(16, 2))
+    title_row.pack(fill='x', pady=(10, 2))
     tk.Label(title_row, text="Photo Watermark", font=big_font,
-             bg='#1e3a5f', fg='#ffffff').pack(side='left')
+             bg='#1e3a5f', fg='#ffffff').pack(side='left', padx=(24, 0))
     tk.Label(title_row, text="· 照片水印", font=big_font,
              bg='#1e3a5f', fg='#a9c6ea').pack(side='left')
     ver_badge = tk.Label(title_row, text=VERSION, font=small_font,
@@ -3466,7 +3527,7 @@ def select_paths_gui() -> tuple:
                              activeforeground='#ffffff', relief='flat', bd=0,
                              cursor='hand2', padx=16, pady=5,
                              command=open_settings)
-    btn_settings.pack(side='right')
+    btn_settings.pack(side='right', padx=(0, 24))
     # EXIF 信息查看（快门数等）：独立窗口，与设置按钮并列
     btn_exif = tk.Button(title_row, text="📷 EXIF", font=base_font,
                          bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
@@ -3481,13 +3542,14 @@ def select_paths_gui() -> tuple:
                          cursor='hand2', padx=16, pady=5,
                          command=toggle_fullscreen)
     btn_full.pack(side='right')
-    tk.Label(header, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
-             bg='#1e3a5f', fg='#9db4d0').pack(pady=(2, 8))
-    gh_row = tk.Frame(header, bg='#1e3a5f')
-    gh_row.pack(pady=(0, 10))
-    gh_lb = tk.Label(gh_row, text="GitHub 主页（源码/更新/反馈）", font=small_font,
+    # 副标题与 GitHub 链接合并一行，压缩头部高度（全屏时不至于占一大条竖向空间）
+    sub_row = tk.Frame(header, bg='#1e3a5f')
+    sub_row.pack(pady=(2, 6))
+    tk.Label(sub_row, text="给相机照片添加拍摄参数水印边框 · 自动识别品牌Logo", font=small_font,
+             bg='#1e3a5f', fg='#9db4d0').pack(side='left')
+    gh_lb = tk.Label(sub_row, text="GitHub 主页（源码/更新/反馈）", font=small_font,
                      bg='#1e3a5f', fg='#bcd0ea', cursor='hand2')
-    gh_lb.pack(side='left')
+    gh_lb.pack(side='left', padx=(14, 0))
     gh_lb.bind('<Button-1>', lambda e: webbrowser.open(PROJECT_URL))
     tk.Frame(header, height=2, bg='#2e5a8f').pack(fill='x')
 
@@ -3565,7 +3627,7 @@ def select_paths_gui() -> tuple:
     ttk.Button(btm, text="取消", command=root.destroy,
                style='Normal.TButton').pack(side='right')
 
-    # 右列：实时预览面板（全部视图 2x2 网格 / 单个视图大图）
+    # 右列：实时预览面板（全部视图 2 列网格 / 单个视图大图）
     pv_panel = ttk.LabelFrame(frame, text=" 实时预览 ", padding=10)
     pv_panel.grid(row=0, column=1, sticky='nsew', padx=(14, 0))
     # 视图切换（默认全部视图）+ 全屏按钮
@@ -3774,11 +3836,10 @@ def process_multiple_files(
         **kwargs: 其他参数
 
     Returns:
-        (成功数量, 跳过数量, 总数量, 用时秒数)
+        (成功数量, 总数量, 用时秒数)
     """
     files = sorted(Path(p) for p in file_list)
     success_count = 0
-    skipped_count = 0
     start_time = datetime.now()
 
     first_style = style.split(',')[0].strip() if style else 'strip'
@@ -3791,13 +3852,11 @@ def process_multiple_files(
         status = process_single_image(str(img_file), str(output_file), style, custom_text, **kwargs)
         if status == 'ok':
             success_count += 1
-        elif status == 'skipped':
-            skipped_count += 1
         else:
             print(f"  -> 处理失败")
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
-    return success_count, skipped_count, len(files), elapsed_time
+    return success_count, len(files), elapsed_time
 
 
 def main():
@@ -3984,7 +4043,7 @@ def main():
             sys.exit(0)
 
     # 验证样式参数
-    valid_styles = {'strip', 'transparent', 'border', 'blur', 'art', 'wordmark'}
+    valid_styles = {'strip', 'transparent', 'border', 'blur', 'art', 'wordmark', 'none'}
     for s in args.style.split(','):
         if s.strip() not in valid_styles:
             print(f"错误: 未知样式 '{s.strip()}'，支持的样式: {', '.join(valid_styles)}")
@@ -4087,27 +4146,24 @@ def main():
         if multi_files or multi_dirs:
             # 多文件/多文件夹处理（图形界面多选或拖拽传入）
             total_success = 0
-            total_skipped = 0
             total_count = 0
             start_time = datetime.now()
 
             if multi_files:
                 print(f"批量处理 {len(multi_files)} 张照片（输出到照片所在目录）")
                 print("-" * 50)
-                s, sk, t, _ = process_multiple_files(multi_files, args.style, args.text, **kwargs)
+                s, t, _ = process_multiple_files(multi_files, args.style, args.text, **kwargs)
                 total_success += s
-                total_skipped += sk
                 total_count += t
 
             for d in (multi_dirs or []):
                 print(f"批量处理文件夹: {d}")
                 print(f"输出目录: {d / 'watermark_output'}")
                 print("-" * 50)
-                s, sk, t, _ = batch_process(
+                s, t, _ = batch_process(
                     str(d), str(d / 'watermark_output'), args.style, args.text, **kwargs
                 )
                 total_success += s
-                total_skipped += sk
                 total_count += t
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -4116,19 +4172,15 @@ def main():
                 print(f"[成功] 全部完成: {total_success}/{total_count} 张照片处理成功")
             else:
                 print(f"[警告] 部分完成: {total_success}/{total_count} 张照片处理成功")
-            if total_skipped:
-                print(f"[跳过] {total_skipped} 张照片输出已存在，未重新处理（可删除旧文件或在设置中开启覆盖）")
             print(f"[用时]  用时: {elapsed_time:.1f} 秒")
 
             # 控制台隐藏时自动打开所在文件夹，方便查看结果
             if CONSOLE_HIDDEN and AUTO_OPEN_OUTPUT and sys.platform == 'win32':
                 first_dir = Path(multi_files[0]).parent if multi_files else multi_dirs[0]
                 os.startfile(os.path.abspath(str(first_dir)))
-            # 控制台隐藏时提示结果（有失败或跳过时）
-            if CONSOLE_HIDDEN and (total_success < total_count or total_skipped):
+            # 控制台隐藏时提示结果（有失败时）
+            if CONSOLE_HIDDEN and total_success < total_count:
                 msg = f"处理完成：{total_success}/{total_count} 张成功"
-                if total_skipped:
-                    msg += f"，{total_skipped} 张已存在被跳过"
                 notify("完成", msg)
 
         elif input_path.is_file():
@@ -4156,10 +4208,6 @@ def main():
                 # 控制台隐藏时自动打开所在文件夹，方便查看结果
                 if CONSOLE_HIDDEN and AUTO_OPEN_OUTPUT and sys.platform == 'win32':
                     os.startfile(os.path.abspath(str(Path(output_path).parent)))
-            elif status == 'skipped':
-                print(f"[跳过] 输出文件已存在，未重新处理: {Path(output_path).name}")
-                if CONSOLE_HIDDEN:
-                    notify("提示", f"输出文件已存在，未重新处理:\n{Path(output_path).name}")
             else:
                 notify("处理失败", f"处理失败: {input_path.name}", is_error=True)
                 if not gui_mode:
@@ -4177,7 +4225,7 @@ def main():
             print(f"输出目录: {output_dir}")
             print("-" * 50)
 
-            success, skipped, total, elapsed_time = batch_process(
+            success, total, elapsed_time = batch_process(
                 str(input_path), output_dir, args.style, args.text, **kwargs
             )
 
@@ -4186,19 +4234,15 @@ def main():
                 print(f"[成功] 全部完成: {success}/{total} 张图片处理成功")
             else:
                 print(f"[警告]  部分完成: {success}/{total} 张图片处理成功")
-            if skipped:
-                print(f"[跳过] {skipped} 张图片输出已存在，未重新处理")
             print(f"[用时]  用时: {elapsed_time:.1f} 秒")
             print(f"[目录] 输出目录: {output_dir}")
 
             # 自动打开输出目录（Windows）
             if AUTO_OPEN_OUTPUT and sys.platform == 'win32':
                 os.startfile(os.path.abspath(output_dir))
-            # 控制台隐藏时提示结果（有失败或跳过时）
-            if CONSOLE_HIDDEN and (success < total or skipped):
+            # 控制台隐藏时提示结果（有失败时）
+            if CONSOLE_HIDDEN and success < total:
                 msg = f"处理完成：{success}/{total} 张成功"
-                if skipped:
-                    msg += f"，{skipped} 张已存在被跳过"
                 notify("完成", msg)
 
         else:

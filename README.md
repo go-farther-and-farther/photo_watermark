@@ -20,13 +20,21 @@
   - 支持：Nikon、Canon、Sony、Fuji、Hasselblad、Olympus、OM System、Pentax、Panasonic
   - 可自定义Logo图片
 
-- **六种水印样式**
+- **六种水印样式 + 无水印纯压缩**
   - `strip` — 白底黑字条形边框（默认，尼康/佳能风格）
   - `transparent` — 半透明水印
   - `border` — 纯色边框
   - `blur` — 模糊边框（取图片边缘模糊，效果自然好看）
   - `art` — 艺术字体（品牌艺术字+拍摄参数叠加照片底部，无边框；默认内置 Montserrat Italic 粗斜体——风格接近相机品牌 LOGO 字样，可换成任意 TTF/OTF 艺术字体）
   - `wordmark` — 官方LOGO（品牌官方LOGO字标图+机型+参数叠加照片底部，无边框；内置 16 品牌透明字标，字标大小/颜色独立可调，未匹配品牌时回退艺术字）
+  - `none` — 无水印(仅压缩)：不加水印，把图片压缩/转换成 JPG 输出到源图旁的子文件夹（默认 `JPEG`），文件名保持原名、源图不动；适合游戏截图、批量减小体积
+
+- **压缩/缩放/目标体积（`none` 样式 + 通用缩放）**
+  - **最大边长**：保持原尺寸（默认）/ 8K / 4K / 2K / 自定义像素，只缩不放，**对所有样式生效**（先缩放再画水印，边框比例不变形）；12K 游戏截图缩到 4K 后体积约为原来的 1/9
+  - **目标体积 (MB)**：`none` 输出自动调整 JPEG 质量（30-95）使文件不超过目标值，压不到时按质量 30 输出并提示；0=关闭
+  - **安全**：源图永不被修改；压缩后反而变大的文件自动跳过；写入采用临时文件+原子替换
+  - PNG 内嵌的工作流元数据（ComfyUI/SD）自动存为同名 `.json` 放进输出子文件夹
+  - 设置位置：设置窗口 → 总设置 → 输出设置（对应 `水印设置.ini` → `[压缩设置]`）
 
 - **自定义边框背景图**
   - 可自由选择一张图片作为水印边框的背景（strip/纯色边框样式生效）
@@ -159,6 +167,9 @@ photo_watermark.exe input.jpg --style blur
 
 # 艺术字体（品牌艺术字+参数，叠加照片底部）
 photo_watermark.exe input.jpg --style art
+
+# 无水印(仅压缩)：转 JPG 输出到源图旁 JPEG/ 子文件夹，可配合设置里的最大边长/目标体积
+photo_watermark.exe screenshot.png --style none
 ```
 
 ### 自定义文字
@@ -177,7 +188,7 @@ photo_watermark.exe input.jpg --style border --text "©2026 My Photo"
 |------|------|--------|
 | `input` | 输入图片或文件夹路径 | 留空则弹出窗口选择（`水印设置.ini` 可设置默认路径） |
 | `-o, --output` | 输出路径 | `config.py` 配置（留空则自动命名） |
-| `-s, --style` | 水印样式：`strip` / `transparent` / `border` / `blur` / `art` | `config.py` 配置 |
+| `-s, --style` | 水印样式：`strip` / `transparent` / `border` / `blur` / `art` / `wordmark` / `none`（无水印仅压缩） | `config.py` 配置 |
 | `-t, --text` | 自定义水印文字 | 无 |
 | `-p, --position` | 半透明水印位置：`top-left` / `top-right` / `bottom-left` / `bottom-right` | `config.py` 配置 |
 | `--border-color` | 边框颜色（`black`/`white`/`gray` 或 RGB 如 `255,255,255`） | `config.py` 配置 |
@@ -236,6 +247,9 @@ FONT_SIZE_RATIO = 3             # 字体大小 = 边框高度 / 此值
 SHOW_CONSOLE_WINDOW = False     # 是否显示控制台窗口（exe模式生效，False=隐藏黑窗口）
 BORDER_BACKGROUND_IMAGE = ''    # 边框背景图路径（留空=纯色背景）
 BORDER_BACKGROUND_OPACITY = 128 # 边框背景图透明度 (0-255)，128=半透明
+COMPRESS_MAX_EDGE = 0           # 最大边长(像素)：0=不缩放；7680=8K 3840=4K 2560=2K（只缩不放，对所有样式生效）
+COMPRESS_TARGET_MB = 0          # 目标体积(MB)：>0 时 none 样式自动调质量(30-95)压到目标；0=关闭
+COMPRESS_SUBFOLDER = 'JPEG'     # none 样式输出的子文件夹名（源图旁创建，文件名保持原名）
 ```
 
 **路径配置说明：**
