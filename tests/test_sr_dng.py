@@ -3,10 +3,12 @@
 
 - 白平衡乘数 -> AsShotNeutral 换算（纯函数）
 - sRGB 预览渲染（WB -> XYZ -> sRGB）
-- write_linear_dng：exiftool 识别为 DNG、关键标签齐全、像素可无损读回
+- write_linear_dng：Adobe 结构（IFD0 预览 + SubIFD LinearRaw 瓦片，单 IFD 裸结构
+  会被 LR 拒收）、关键标签齐全、raw 像素可无损读回
 - 线性相机域解码 + 元数据提取（有真实 NEF 才跑）
 - JPG 连拍组自动回退 TIF（无相机空间）
 """
+import struct
 import sys
 from pathlib import Path
 
@@ -75,30 +77,86 @@ class TestRenderSrgbPreview:
         assert out.min() >= 0 and out.max() <= 255
 
 
+def _read_subifd_raw(dng_path):
+    """手动解析 SubIFDs -> LinearRaw 瓦片并拼装（tifffile 不把 SubIFD 暴露为 series）"""
+    tf = tifffile.TiffFile(str(dng_path))
+    fh = tf.filehandle
+    off = tf.pages[0].tags[0x014A].value[0]      # SubIFDs 首偏移
+    fh.seek(off)
+    n_entries = struct.unpack('<H', fh.read(2))[0]
+    tags = {}
+    base = off + 2
+    for k in range(n_entries):
+        fh.seek(base + k * 12)
+        code, typ, cnt = struct.unpack('<HHI', fh.read(8))
+        tags[code] = (typ, cnt, fh.read(4))
+
+    def rd(code, n=None):
+        typ, cnt, vo = tags[code]
+        n = cnt if n is None else n
+        esz, fmt = {3: (2, 'H'), 4: (4, 'I')}[typ]
+        if esz * n <= 4:
+            return struct.unpack('<' + fmt * n, vo[:esz * n])
+        fh.seek(struct.unpack('<I', vo)[0])
+        return struct.unpack('<' + fmt * n, fh.read(esz * n))
+
+    w, h = rd(0x0100)[0], rd(0x0101)[0]
+    tw_, tl = rd(0x0142)[0], rd(0x0143)[0]
+    toff = rd(0x0144)
+    tcnt = rd(0x0145)
+    photo = rd(0x0106)[0]
+    ny, nx = (h + tl - 1) // tl, (w + tw_ - 1) // tw_
+    assert len(toff) == nx * ny
+    out = np.empty((h, w, 3), np.uint16)
+    for i in range(len(toff)):
+        ty, tx = divmod(i, nx)
+        th, tw = min(tl, h - ty * tl), min(tw_, w - tx * tw_)
+        fh.seek(toff[i])
+        tile = np.frombuffer(fh.read(tcnt[i]), '<u2', tl * tw_ * 3).reshape(tl, tw_, 3)
+        out[ty*tl:ty*tl+th, tx*tw_:tx*tw_+tw] = tile[:th, :tw]  # 边缘瓦片按规范填充
+    return photo, (tw_, tl), out
+
+
 class TestWriteLinearDng:
     def test_creates_valid_dng(self, tmp_path):
         et = _exiftool_or_skip()
         import subprocess
         arr = np.full((64, 48, 3), 30000, np.uint16)
         arr[:32] = 10000
+        preview = np.zeros((16, 12, 3), np.uint8)
+        preview[8:] = 255
         dng = tmp_path / "out_2x.dng"
         assert sr_process.write_linear_dng(
             dng, arr, Z6_MATRIX, [0.6337, 1.0, 0.6344],
-            camera_model="NIKON Z 6", exiftool=et)
+            camera_model="NIKON Z 6", exiftool=et, preview_rgb=preview,
+            orig_raw_name="DSC_0001.NEF")
 
         # exiftool 识别为 DNG 且关键标签齐全；必须无压缩（Deflate 会被 LR 拒收）
         r = subprocess.run([et, '-FileType', '-DNGVersion', '-ColorMatrix1',
-                            '-AsShotNeutral', '-WhiteLevel', '-PhotometricInterpretation',
-                            '-Compression', str(dng)], capture_output=True, text=True)
+                            '-AsShotNeutral', '-PhotometricInterpretation',
+                            '-Compression', str(dng)],
+                           capture_output=True, text=True)
         assert 'DNG' in r.stdout
         assert 'Linear Raw' in r.stdout
         assert '0.9943' in r.stdout
         assert 'As Shot Neutral' in r.stdout
         assert 'Uncompressed' in r.stdout  # Deflate 会被 Lightroom 拒收
 
-        # 像素无损读回（数据通道，DNG 即 TIFF）
-        back = tifffile.imread(str(dng))
-        np.testing.assert_array_equal(back, arr)
+        # Adobe 结构：IFD0=RGB 预览(NewSubfileType=1)，SubIFD=LinearRaw 瓦片(NewSubfileType=0)
+        tf = tifffile.TiffFile(str(dng))
+        ifd0 = tf.pages[0]
+        assert ifd0.photometric == 2 and ifd0.tags[0x00FE].value == 1
+        assert ifd0.shape == (16, 12, 3)
+        # Orientation 必须是 1（print 转换曾把 -Orientation=1 写成 3）；
+        # CalibrationIlluminant1 必须是 21=D65（全局 -n 曾把它写成 0xD65=3429）
+        assert ifd0.tags[0x0112].value == 1
+        assert ifd0.tags[0xC65A].value == 21
+        # IFD0 带 DNGVersion（缺失会被 LR 整体拒收）
+        assert ifd0.tags[0xC612].value == b'\x01\x04\x00\x00'
+        photo, (tw_, tl_), raw = _read_subifd_raw(dng)
+        assert photo == 34892
+        assert tw_ == tl_ == 64            # 48x64 小图 -> 单块 16 倍数瓦片
+        np.testing.assert_array_equal(raw, arr)
 
 
 class TestDeriveCameraToSrgb:
@@ -130,12 +188,30 @@ class TestRealNefMetadata:
 
     @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
     def test_measure_as_shot_neutral(self):
-        """实测比值：ColorSpace.raw 下 libraw 已烙入 WB 乘数，AsShotNeutral=两次解码比值"""
+        """实测比值 = AsShotNeutral（nocam 在分子）：让 as-shot 场景恢复中性的乘数
+
+        此前实现把分子分母写反（标签整组取倒），LR 渲染强偏黄、色温滑块顶到
+        2000K 极端（2026-10-16 实测）。暖光夜景（ISO4000 室内）：R 中性乘数应
+        大于 B（实测约 [1.28, 1.0, 0.74]）。
+        """
         n = sr_process.measure_as_shot_neutral(Z6_NEF)
         assert n is not None and len(n) == 3
         assert all(0.3 < v < 3.5 for v in n)
-        # 暖色场景（ISO4000 室内）：B 通道补偿大于 R（实测约 [0.78, 1.0, 1.35]）
-        assert n[2] > n[0]
+        assert n[0] > n[2]
+
+    @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
+    def test_as_shot_neutral_from_metadata(self):
+        """元数据直读 day/cam：与双解码实测比值一致（交叉验证，差异 < 2%）"""
+        meta = sr_process.as_shot_neutral_from_metadata(Z6_NEF)
+        assert meta is not None and len(meta) == 3
+        assert meta[1] == pytest.approx(1.0, abs=1e-6)
+        # Z6 实测：day=[1.898, 0.937, 1.090] / cam=[1.578, 1, 1.576] -> 约 [1.28, 1, 0.74]
+        assert meta[0] == pytest.approx(1.284, abs=0.03)
+        assert meta[2] == pytest.approx(0.738, abs=0.03)
+        measured = sr_process.measure_as_shot_neutral(Z6_NEF)
+        assert measured is not None
+        for a, b in zip(meta, measured):
+            assert a == pytest.approx(b, rel=0.02)
 
     @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
     def test_read_raw_camera_linear_is_linear(self):

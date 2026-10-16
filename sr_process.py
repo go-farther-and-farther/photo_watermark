@@ -104,12 +104,13 @@ def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
     Lightroom 依据 LensModel/LensMake 自动挂镜头矫正配置。
     拷贝时排除并改写尺寸标签（输出分辨率与源帧不同）；**排除 MakerNotes 整块移植**
     ——NEF 的 makernote 内含预览指针，跨文件移植后指向零长度数据
-    （PreviewImageLength=0），Lightroom 的严格解析器会因此拒收整个 DNG。
+    （PreviewImageLength=0），Lightroom 的严格解析器会因此拒收整个 DNG；
+    同时排除 CFAPattern（Bayer 排布对 LinearRaw 无意义，纯残留）。
     失败返回 False（调用方回退基础 EXIF）。
     """
     import subprocess
     cmd = [exiftool, '-tagsfromfile', str(ref_path),
-           '-EXIF:all', '--MakerNotes', '--PreviewImage',
+           '-EXIF:all', '--MakerNotes', '--PreviewImage', '--CFAPattern',
            '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
            f'-ExifImageWidth={width}', f'-ExifImageHeight={height}',
            '-overwrite_original', '-q', str(target_path)]
@@ -127,7 +128,11 @@ RAW_EXTS = ('.arw', '.cr2', '.cr3', '.nef', '.orf', '.raf', '.dng', '.rw2')
 
 
 def neutral_from_cam_mul(cam_mul):
-    """rawpy camera_whitebalance(R,G,B,G2) -> AsShotNeutral（取倒数）"""
+    """rawpy camera_whitebalance(R,G,B,G2) -> AsShotNeutral（取倒数）
+
+    仅作末级兜底：假设数据未烙任何 WB（纯相机原生域）才成立；本管线数据烙有
+    daylight 乘数，精确值应走 as_shot_neutral_from_metadata / 实测比值。
+    """
     m = [float(v) for v in list(cam_mul)[:3]]
     if len(m) < 3 or min(m) <= 0:
         return None
@@ -159,19 +164,42 @@ def read_raw_camera_linear(raw_path, half_size=False, use_camera_wb=False):
         raw.close()
 
 
-def measure_as_shot_neutral(ref_path):
-    """实测 AsShotNeutral：同一帧 raw 色彩空间两种 WB 解码的通道中位数比值
+def as_shot_neutral_from_metadata(raw_path):
+    """从 RAW 元数据直读 AsShotNeutral：daylight 乘数 / as-shot 乘数（各自按 G 归一）
 
-    融合数据用 use_camera_wb=False（烙 daylight 乘数 p），as-shot 还原需要
-    neutral = cam_mul / p；直接用两次解码的比值 r=median(cam)/median(nocam)，
-    连 libraw 内部的归一化细节一起被消掉。异常返回 None（回退元数据换算）。
+    管线把 libraw 的 daylight 乘数烙进融合数据（use_camera_wb=False），数据里
+    灰色 ∝ day/cam，故 AsShotNeutral = day/cam——与双解码实测比值同源，但
+    确定性、零解码成本、不依赖场景内容（夜景中位数会被暗部/黑电平差带偏）。
+    rawpy 无 daylight_whitebalance 或数值异常时返回 None（回退实测）。
+    """
+    try:
+        import rawpy
+        with rawpy.imread(str(raw_path)) as raw:
+            day = [float(v) for v in list(raw.daylight_whitebalance)[:3]]
+            cam = [float(v) for v in list(raw.camera_whitebalance)[:3]]
+        if len(day) < 3 or len(cam) < 3 or min(day) <= 0 or min(cam) <= 0:
+            return None
+        return [float(np.clip((d / day[1]) / (c / cam[1]), 0.25, 4.0))
+                for d, c in zip(day, cam)]
+    except Exception:
+        return None
+
+
+def measure_as_shot_neutral(ref_path):
+    """实测 AsShotNeutral：同帧两种 WB 解码的通道中位数比值（nocam/cam）
+
+    融合数据烙 daylight 乘数 p（use_camera_wb=False），数据里灰色 ∝ p/cam_mul，
+    AsShotNeutral = median(nocam)/median(cam)——即让 as-shot 场景恢复中性的
+    乘数（LR 施加其倒数作增益）。**注意是 nocam 在分子**：此前写成 cam/nocam
+    导致标签整组取倒，LR 渲染强偏黄、色温滑块被顶到极端（2026-10-16 实测）。
+    连 libraw 内部归一化细节一起消掉；异常返回 None（回退元数据换算）。
     """
     try:
         nocam = read_raw_camera_linear(ref_path, half_size=True, use_camera_wb=False)
         cam = read_raw_camera_linear(ref_path, half_size=True, use_camera_wb=True)
         mn = np.median(nocam.reshape(-1, 3), axis=0)
         mc = np.median(cam.reshape(-1, 3), axis=0)
-        ratio = mc / np.maximum(mn, 1e-6)
+        ratio = mn / np.maximum(mc, 1e-6)
         if not np.isfinite(ratio).all():
             return None
         return [float(np.clip(v, 0.25, 4.0)) for v in ratio]
@@ -249,18 +277,45 @@ def render_srgb_preview(linear_nocam, cam_to_srgb):
     return (out * 255 + 0.5).astype(np.uint8)
 
 
-def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model, exiftool):
-    """写 Linear DNG：tifffile 出图像数据（LinearRaw 无压缩），ExifTool 补 DNG 标签集
+def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
+                     exiftool, preview_rgb=None, orig_raw_name=None):
+    """写 Linear DNG：Adobe 结构（IFD0 预览 + SubIFD LinearRaw 512 瓦片），ExifTool 补标签
 
     LR/ACR 打开后即为 raw：Kelvin 色温、相机配置文件、镜头矫正全部可用。
-    压缩必须用无压缩（580MB@24MP×2）——Lightroom 的 DNG 读取器对 LinearRaw
-    只稳定支持 JPEG-LL/无压缩，Adobe Deflate 会被拒收（实测打不开）。
+    结构必须遵 Adobe 惯例：raw 在 SubIFD（NewSubfileType=0）、IFD0 放 RGB 预览
+    （NewSubfileType=1）、raw 数据 512 瓦片分块——单 IFD 裸结构（raw 直接在 IFD0、
+    单条巨 strip）Lightroom 一律拒收（实测同标签集下 Adobe 结构可导入、单 IFD 被拒）。
+    压缩必须无压缩（~600MB@24MP×2）——Lightroom 的 DNG 读取器对 LinearRaw 只
+    稳定支持 JPEG-LL/无压缩，Adobe Deflate 会被拒收（实测打不开）。
+
+    exiftool 写 DNG 标签的坑（exiftool 13.59 实测）：
+    - BlackLevel/WhiteLevel/DefaultCrop*/ActiveArea 等 raw 几何标签被路由到 SubIFD
+      组且要求特定值数量（BlackLevel 4 值、WhiteLevel 按通道数），不符即静默丢弃；
+      其缺省值恰为本管线数据（黑 0/白满/无裁剪），故干脆不写。
+    - 数值枚举必须用 `TAG#=` 语法：`-Orientation=1` 经 print 转换会写成 3；
+      全局 `-n` 则会连累 `-CalibrationIlluminant1=D65`（解析成 0xD65=3429）和
+      `-DNGVersion=1.4.0.0`（解析失败整条丢弃）。
+    preview_rgb 为 sRGB u8（RGB 序），超宽自动缩到 1600px；None 时退化为对 raw
+    直接 gamma（仅供无预览管线的兜底）。orig_raw_name 写入 OriginalRawFileName。
     """
     import subprocess
+    import uuid
     path = Path(path)
     h, w = arr_u16.shape[:2]
-    tifffile.imwrite(str(path), arr_u16, photometric=34892, compression=None,
-                     planarconfig='CONTIG')
+    if preview_rgb is None:
+        prev = (np.clip(arr_u16.astype(np.float32) / 65535.0, 0, 1) ** (1 / 2.2)
+                * 255 + 0.5).astype(np.uint8)
+    else:
+        prev = np.ascontiguousarray(preview_rgb)
+        if prev.shape[1] > 1600:
+            ph = max(1, round(prev.shape[0] * 1600 / prev.shape[1]))
+            prev = cv2.resize(prev, (1600, ph), interpolation=cv2.INTER_AREA)
+    tile = min(512, -(-max(w, h) // 16) * 16)  # 瓦片须为 16 的倍数且小于图时取整图
+    with tifffile.TiffWriter(str(path)) as tw:
+        tw.write(prev, photometric=2, compression=None, planarconfig='CONTIG',
+                 subfiletype=1, subifds=1, resolution=(72, 72))
+        tw.write(arr_u16, photometric=34892, compression=None, planarconfig='CONTIG',
+                 subfiletype=0, tile=(tile, tile))
     m = ' '.join(f'{float(v):.6g}' for v in np.asarray(color_matrix).ravel())
     n = ' '.join(f'{float(v):.6g}' for v in as_shot_neutral)
     cmd = [exiftool,
@@ -270,15 +325,12 @@ def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
            f'-ColorMatrix1={m}',
            '-CalibrationIlluminant1=D65',
            f'-AsShotNeutral={n}',
-           '-BlackLevel=0',
-           '-WhiteLevel=65535',
-           '-DefaultScale=1 1',
-           '-DefaultCropOrigin=0 0',
-           f'-DefaultCropSize={w} {h}',
-           f'-ActiveArea=0 0 {h} {w}',
            '-BaselineExposure=0', '-BaselineNoise=0', '-BaselineSharpness=0',
-           '-Orientation=1',
+           f'-RawDataUniqueID={uuid.uuid4().hex}',
+           '-IFD0:Orientation#=1',
            '-overwrite_original', '-q', str(path)]
+    if orig_raw_name:
+        cmd.insert(len(cmd) - 2, f'-OriginalRawFileName={orig_raw_name}')
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=120)
         return r.returncode == 0
@@ -752,7 +804,10 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         if all(Path(str(f)).suffix.lower() in RAW_EXTS for f in raw_files):
             dng_meta = extract_dng_metadata(raw_files[ref_idx])
             if dng_meta:
-                as_shot_neutral = measure_as_shot_neutral(raw_files[ref_idx])
+                # 元数据直读优先（确定性零成本）；缺 daylight_whitebalance 时实测
+                as_shot_neutral = as_shot_neutral_from_metadata(raw_files[ref_idx])
+                if as_shot_neutral is None:
+                    as_shot_neutral = measure_as_shot_neutral(raw_files[ref_idx])
                 if as_shot_neutral is None:
                     import rawpy as _rp
                     with _rp.imread(str(raw_files[ref_idx])) as _raw:
@@ -779,9 +834,16 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         print("\n[4/4] 输出 Linear DNG 母版（线性数据，调色/降噪/锐化全部留给 LR）...")
         out_h, out_w = sr_result.shape[:2]
         arr_u16 = (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)
+        # 预览先渲染（同帧实测仿射 nocam->线性sRGB，观感与旧 sRGB 管线同口径），
+        # 同一张既烙进 DNG 的 IFD0（LR 导入即显）又存成 JPG
+        transform = derive_camera_to_srgb(ref_frame)
+        if transform is None:
+            transform = (np.eye(3), np.zeros(3))  # 极端兜底（仅观感退化，不阻断输出）
+        preview = render_srgb_preview(sr_result, transform)
         dng_path = base + f'_{scale}x.dng'
         if not write_linear_dng(dng_path, arr_u16, dng_meta['matrix'], as_shot_neutral,
-                                dng_meta['model'], et):
+                                dng_meta['model'], et,
+                                preview_rgb=preview, orig_raw_name=ref_frame.name):
             raise RuntimeError(f"DNG 写入失败: {dng_path}")
         dng_mb = Path(dng_path).stat().st_size / (1024*1024)
         if copy_exif_from_frame(et, ref_frame, dng_path, width=out_w, height=out_h):
@@ -789,17 +851,12 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         else:
             print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版)")
 
-        # JPG 预览：实测仿射变换 nocam->线性sRGB（含WB），观感与旧 sRGB 管线同口径
-        transform = derive_camera_to_srgb(ref_frame)
-        if transform is None:
-            transform = (np.eye(3), np.zeros(3))  # 极端兜底（仅观感退化，不阻断输出）
         jpg_path = base + f'_{scale}x.jpg'
-        preview = render_srgb_preview(sr_result, transform)
         ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(preview, cv2.COLOR_RGB2BGR),
                                    [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:
             Path(jpg_path).write_bytes(jpg_buf.tobytes())
-        copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h)
+            copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h)
         jpg_mb = Path(jpg_path).stat().st_size / (1024*1024)
         print(f"  JPG:  {jpg_path} ({jpg_mb:.0f}MB, sRGB 预览)")
 

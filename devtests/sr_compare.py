@@ -23,7 +23,7 @@ import numpy as np
 import cv2
 
 DEFAULT_REF = r'C:\Users\LQL\Pictures\raw\100NCZ_6\DSC_0020.NEF'
-DEFAULT_OUT = r'C:\Users\LQL\Pictures\raw\100NCZ_6\SR输出\dng测试2_2x.jpg'
+DEFAULT_OUT = r'C:\Users\LQL\Pictures\raw\100NCZ_6\SR输出\dng测试3_adobe结构_2x.jpg'
 W = 1200  # 统一比较宽度
 
 
