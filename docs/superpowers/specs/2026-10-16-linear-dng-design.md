@@ -17,10 +17,13 @@
    - `AsShotNeutral` = 1 / `rawpy.camera_whitebalance`（RGB 三通道，拍摄白平衡）
    - `BlackLevel=0 / WhiteLevel=65535`（postprocess 输出已做黑电平扣除与归一化）
 4. **DNG 结构**：tifffile 写 TIFF + DNG extratags（DNGVersion 1.4、LinearRaw photometric
-   34892、3 samples 16bit、zlib 压缩）；完整 EXIF 仍经 ExifTool 从参考帧拷入（DNG 即 TIFF
+   34892、3 samples 16bit、**无压缩**——Lightroom 对 LinearRaw 只稳定支持 JPEG-LL/无压缩，
+   Adobe Deflate 实测被拒收）；完整 EXIF 仍经 ExifTool 从参考帧拷入（DNG 即 TIFF
    结构，ExifTool 直接可写）。
-5. **输出组合**（RAW 组）：`*_2x.dng`（母版）+ `*_2x.jpg`（预览：WB→XYZ→sRGB D65→gamma，
-   仅预览做轻度自动拉伸）。TIF 在 DNG 模式下不再输出。
+5. **输出组合**（RAW 组）：`*_2x.dng`（母版）+ `*_2x.jpg`（预览：WB 后经**实测回归的
+   相机→线性sRGB 矩阵**渲染——libraw 内部矩阵约定与理论公式 inv(cam_xyz)@sRGB 不一致，
+   理论路线曾导致洋红偏色，改为同帧两种解码最小二乘回归；仅预览做轻度自动拉伸）。
+   TIF 在 DNG 模式下不再输出。
 6. **回退**：JPG 连拍无相机空间 → 维持原 TIF+JPG；矩阵缺失/异常 → 回退 TIF 并打印原因。
 
 ## 验收

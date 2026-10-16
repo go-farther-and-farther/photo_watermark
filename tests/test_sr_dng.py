@@ -47,26 +47,31 @@ class TestNeutralFromCamMul:
         assert sr_process.neutral_from_cam_mul([2.0, 1.0, 4.0]) == pytest.approx([0.5, 1.0, 0.25])
 
 
+# 实测的 Z6「nocam 相机RGB -> 线性sRGB」仿射矩阵（libraw 回归得出，对角占优）
+Z6_CAM_TO_SRGB = [[1.228, -0.395, -0.237],
+                  [-0.102, 1.468, -0.450],
+                  [0.017, -0.278, 1.667]]
+
+
 class TestRenderSrgbPreview:
-    def test_neutral_white_renders_gray(self):
-        # 自洽检验：D65 中性白 w 的相机响应 c0 = M·w，WB=单位向量时
-        # 逆矩阵还原回 w，XYZ→sRGB 定义上 w 映射为 (1,1,1) → 三通道相等
-        M = np.array(Z6_MATRIX, np.float64)
-        w = np.array([0.9505, 1.0, 1.0889])  # D65 白点
-        c0 = (M @ w).astype(np.float32)
-        linear = np.tile(c0, (8, 12, 1))
-        out = sr_process.render_srgb_preview(linear, M, np.array([1.0, 1.0, 1.0]))
+    def test_neutral_ramp_renders_channel_balanced(self):
+        # 自洽检验：把"各通道相等"的灰阶渐变经 A^-1 逆映射回 nocam 域，
+        # 渲染（A + gamma + 逐通道拉伸）后各通道应仍然相等（不偏色）
+        A = np.array(Z6_CAM_TO_SRGB, np.float64)
+        ramp = np.linspace(0.05, 0.95, 8 * 12).reshape(8, 12).astype(np.float64)
+        target = np.stack([ramp] * 3, axis=2)                      # 线性sRGB 中性渐变
+        Ainv = np.linalg.inv(A)
+        nocam = target @ Ainv.T                                     # (b=0 时)逆映射
+        out = sr_process.render_srgb_preview(nocam.astype(np.float32), (A, np.zeros(3)))
         assert out.shape == (8, 12, 3) and out.dtype == np.uint8
         assert out.max() > 0 and np.isfinite(out).all()
-        center = out[4, 6].astype(int)
-        assert abs(center[0] - center[1]) < 12
-        assert abs(center[1] - center[2]) < 12
+        diff = np.abs(out.astype(int) - out.astype(int)[:, :, :1]).max()
+        assert diff < 12                                            # 三通道一致
 
     def test_output_in_uint8_range(self):
         rng = np.random.default_rng(3)
         linear = rng.random((16, 24, 3)).astype(np.float32)
-        out = sr_process.render_srgb_preview(linear, np.array(Z6_MATRIX, np.float64),
-                                             np.array([0.63, 1.0, 0.63]))
+        out = sr_process.render_srgb_preview(linear, (np.array(Z6_CAM_TO_SRGB), np.zeros(3)))
         assert out.min() >= 0 and out.max() <= 255
 
 
@@ -81,18 +86,34 @@ class TestWriteLinearDng:
             dng, arr, Z6_MATRIX, [0.6337, 1.0, 0.6344],
             camera_model="NIKON Z 6", exiftool=et)
 
-        # exiftool 识别为 DNG 且关键标签齐全
+        # exiftool 识别为 DNG 且关键标签齐全；必须无压缩（Deflate 会被 LR 拒收）
         r = subprocess.run([et, '-FileType', '-DNGVersion', '-ColorMatrix1',
                             '-AsShotNeutral', '-WhiteLevel', '-PhotometricInterpretation',
-                            str(dng)], capture_output=True, text=True)
+                            '-Compression', str(dng)], capture_output=True, text=True)
         assert 'DNG' in r.stdout
         assert 'Linear Raw' in r.stdout
         assert '0.9943' in r.stdout
         assert 'As Shot Neutral' in r.stdout
+        assert 'Uncompressed' in r.stdout  # Deflate 会被 Lightroom 拒收
 
         # 像素无损读回（数据通道，DNG 即 TIFF）
         back = tifffile.imread(str(dng))
         np.testing.assert_array_equal(back, arr)
+
+
+class TestDeriveCameraToSrgb:
+    @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
+    def test_affine_from_real_nef(self):
+        r = sr_process.derive_camera_to_srgb(Z6_NEF)
+        assert r is not None
+        A, b = r
+        assert A.shape == (3, 3) and b.shape == (3,)
+        assert np.isfinite(A).all() and np.isfinite(b).all()
+        diag = np.diag(A)
+        assert (diag > 0.5).all() and (diag < 3).all()      # 对角占优且量级合理
+        assert np.abs(b).max() < 0.01                        # 截距很小但非零（黑电平差）
+        # 与实测参考（libraw 半尺寸仿射回归值）同数量级
+        assert abs(A[0, 0] - 1.228) < 0.3
 
 
 class TestRealNefMetadata:

@@ -121,11 +121,6 @@ def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
 
 RAW_EXTS = ('.arw', '.cr2', '.cr3', '.nef', '.orf', '.raf', '.dng', '.rw2')
 
-# XYZ(D65) -> sRGB，标准值
-_XYZ_TO_SRGB = np.array([[3.2404542, -1.5371385, -0.4985314],
-                         [-0.9692660, 1.8760108, 0.0415560],
-                         [0.0556434, -0.2040259, 1.0572252]])
-
 
 def neutral_from_cam_mul(cam_mul):
     """rawpy camera_whitebalance(R,G,B,G2) -> AsShotNeutral（取倒数）"""
@@ -200,34 +195,68 @@ def extract_dng_metadata(raw_path):
         return None
 
 
-def render_srgb_preview(linear_camera, color_matrix, as_shot_neutral):
-    """线性相机 RGB -> WB -> XYZ -> sRGB(D65) -> gamma，uint8 预览
+def derive_camera_to_srgb(ref_path):
+    """实测「相机原生RGB(nocam域) -> 线性sRGB(含as-shot WB)」的仿射变换 (A, b)
 
-    只用于 JPG 预览（带轻度自动拉伸）；母版 DNG 保持线性原样，调色留给 LR。
+    同一帧解码两次（ColorSpace.raw 不带 WB / sRGB 带 WB，同 gamma=1），对中亮度
+    非饱和像素做带截距的最小二乘回归。libraw 的真实变换与理论公式
+    （inv(cam_xyz)@标准sRGB矩阵）不一致（理论路线强洋红偏色），且两种解码
+    的黑电平处理不同导致存在截距——仿射回归把矩阵约定与偏移全部吸收。
+    返回 (A, b)：linear_srgb ≈ nocam @ A.T + b。异常返回 None。
     """
-    rgb = linear_camera.astype(np.float64) * np.asarray(as_shot_neutral, np.float64)
-    cam_to_xyz = np.linalg.inv(np.asarray(color_matrix, np.float64))
-    srgb = (rgb @ cam_to_xyz.T) @ _XYZ_TO_SRGB.T
-    srgb = np.clip(srgb, 0, 1)
-    out = np.where(srgb <= 0.0031308, 12.92 * srgb,
-                   1.055 * np.power(srgb, 1 / 2.4) - 0.055)
-    lo, hi = np.percentile(out, 0.1), np.percentile(out, 99.9)
-    if hi - lo > 0.02:
-        # 直方图有实际动态范围才拉伸；近均匀图上 (out-lo)/(hi-lo) 会把浮点
-        # 舍入差放大成满档色偏（测试抓到过：均匀灰渲染成品红）
-        out = np.clip((out - lo) / (hi - lo), 0, 1)
+    try:
+        import rawpy
+        with rawpy.imread(str(ref_path)) as raw:
+            kw = dict(use_auto_wb=False, half_size=True,
+                      output_bps=16, no_auto_bright=True, gamma=(1, 1))
+            N = raw.postprocess(use_camera_wb=False, output_color=rawpy.ColorSpace.raw,
+                                **kw).astype(np.float64) / 65535.0
+            L = raw.postprocess(use_camera_wb=True, output_color=rawpy.ColorSpace.sRGB,
+                                **kw).astype(np.float64) / 65535.0
+        n, l = N.reshape(-1, 3), L.reshape(-1, 3)
+        lum = l.mean(axis=1)
+        mask = (lum > np.percentile(lum, 25)) & (lum < 0.98) & (n.max(axis=1) < 0.98)
+        X = np.hstack([n[mask], np.ones((int(mask.sum()), 1))])
+        coef, *_ = np.linalg.lstsq(X, l[mask], rcond=None)
+        A, b = coef[:3].T, coef[3]
+        if not (np.isfinite(A).all() and np.isfinite(b).all()):
+            return None
+        return A, b
+    except Exception:
+        return None
+
+
+def render_srgb_preview(linear_nocam, cam_to_srgb):
+    """融合后的 nocam 域线性数据 -> 线性sRGB（实测仿射）-> 2.2 幂 -> 逐通道拉伸
+
+    观感约定与旧 sRGB TIF 管线一致（gamma 2.2 + 逐通道 0.5-99.5 拉伸），
+    便于与旧输出口径对比；母版 DNG 保持线性原样，调色留给 LR。
+    cam_to_srgb 为 derive_camera_to_srgb 返回的 (A, b)。
+    """
+    A, b = cam_to_srgb
+    srgb = np.clip(linear_nocam.astype(np.float64) @ np.asarray(A, np.float64).T
+                   + np.asarray(b, np.float64), 0, 1)
+    out = np.power(srgb, 1.0 / 2.2)
+    out = out.copy()
+    for c in range(3):
+        ch = out[:, :, c]
+        lo, hi = np.percentile(ch, 0.5), np.percentile(ch, 99.5)
+        out[:, :, c] = np.clip((ch - lo) / (hi - lo + 1e-8), 0, 1)
     return (out * 255 + 0.5).astype(np.uint8)
 
 
 def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model, exiftool):
-    """写 Linear DNG：tifffile 出图像数据（LinearRaw + zlib），ExifTool 补 DNG 标签集
+    """写 Linear DNG：tifffile 出图像数据（LinearRaw 无压缩），ExifTool 补 DNG 标签集
 
     LR/ACR 打开后即为 raw：Kelvin 色温、相机配置文件、镜头矫正全部可用。
+    压缩必须用无压缩（580MB@24MP×2）——Lightroom 的 DNG 读取器对 LinearRaw
+    只稳定支持 JPEG-LL/无压缩，Adobe Deflate 会被拒收（实测打不开）。
     """
     import subprocess
     path = Path(path)
     h, w = arr_u16.shape[:2]
-    tifffile.imwrite(str(path), arr_u16, photometric=34892, compression='zlib')
+    tifffile.imwrite(str(path), arr_u16, photometric=34892, compression=None,
+                     planarconfig='CONTIG')
     m = ' '.join(f'{float(v):.6g}' for v in np.asarray(color_matrix).ravel())
     n = ' '.join(f'{float(v):.6g}' for v in as_shot_neutral)
     cmd = [exiftool,
@@ -756,9 +785,12 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         else:
             print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版)")
 
-        # JPG 预览（WB -> XYZ -> sRGB；轻度拉伸仅用于预览）
+        # JPG 预览：实测仿射变换 nocam->线性sRGB（含WB），观感与旧 sRGB 管线同口径
+        transform = derive_camera_to_srgb(ref_frame)
+        if transform is None:
+            transform = (np.eye(3), np.zeros(3))  # 极端兜底（仅观感退化，不阻断输出）
         jpg_path = base + f'_{scale}x.jpg'
-        preview = render_srgb_preview(sr_result, dng_meta['matrix'], as_shot_neutral)
+        preview = render_srgb_preview(sr_result, transform)
         ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(preview, cv2.COLOR_RGB2BGR),
                                    [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:

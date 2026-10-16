@@ -38,7 +38,10 @@ python sr_process.py \
 - 帧以线性相机原生色彩空间解码（`ColorSpace.raw`、无 as-shot 白平衡、无 gamma），融合保持线性
 - 色彩矩阵 `ColorMatrix1` 与机型从 RAW 自带元数据提取（rawpy/libraw，零硬编码机身表）；
   `AsShotNeutral` 由同一帧两种 WB 解码的通道中位数比值实测——LR 的"拍摄时白平衡"精确还原
-- 图像数据 tifffile 写 LinearRaw+zlib，DNG 标签集由 ExifTool 补齐；完整 EXIF 也经 ExifTool 继承
+- **无压缩**存储（24MP×2 约 580MB）：Lightroom 对 LinearRaw 只稳定支持 JPEG-LL/无压缩，
+  Deflate 压缩会被拒收；图像数据 tifffile 写、DNG 标签集由 ExifTool 补齐
+- JPG 预览经**实测回归**的相机→sRGB 矩阵渲染（libraw 矩阵约定与理论公式不一致，
+  理论路线会洋红偏色），对比工具 `devtests/sr_compare.py`（色彩比率+拉普拉斯方差细节指数）
 - libraw 自身不支持读 Linear DNG（rawpy 打不开属正常），目标消费方是 LR/ACR
 
 **EXIF 继承**：装有 ExifTool（水印工具已内置查找）时，参考帧的完整 EXIF——镜头型号、
