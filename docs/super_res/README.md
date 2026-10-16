@@ -29,11 +29,20 @@ python sr_process.py \
 
 | 格式 | 说明 |
 |------|------|
-| 16-bit TIFF | 无压缩，可直接进 Lightroom 调色 |
-| JPG | 预览用，quality 90 |
+| **Linear DNG**（RAW 组默认） | 线性相机域融合的母版，LR/ACR 里就是 raw：**Kelvin 色温、色调、相机配置文件、镜头矫正全部可用**；不锐化/不降噪/不自动拉伸，调色全留给 LR |
+| 16-bit TIFF | JPG 组 / 无 ExifTool 时的回退输出 |
+| JPG | sRGB 预览（WB→XYZ→sRGB 渲染，quality 90） |
+
+**Linear DNG 细节**（设计：`docs/superpowers/specs/2026-10-16-linear-dng-design.md`）：
+
+- 帧以线性相机原生色彩空间解码（`ColorSpace.raw`、无 as-shot 白平衡、无 gamma），融合保持线性
+- 色彩矩阵 `ColorMatrix1` 与机型从 RAW 自带元数据提取（rawpy/libraw，零硬编码机身表）；
+  `AsShotNeutral` 由同一帧两种 WB 解码的通道中位数比值实测——LR 的"拍摄时白平衡"精确还原
+- 图像数据 tifffile 写 LinearRaw+zlib，DNG 标签集由 ExifTool 补齐；完整 EXIF 也经 ExifTool 继承
+- libraw 自身不支持读 Linear DNG（rawpy 打不开属正常），目标消费方是 LR/ACR
 
 **EXIF 继承**：装有 ExifTool（水印工具已内置查找）时，参考帧的完整 EXIF——镜头型号、
-快门、ISO、焦距等——整体拷入 TIF 和 JPG（尺寸标签改写为输出实际值）。Lightroom 打开后
+快门、ISO、焦距等——整体拷入 DNG/TIF 和 JPG（尺寸标签改写为输出实际值）。Lightroom 打开后
 依据 LensModel **自动挂镜头矫正配置**，拍摄信息完整可检索。连拍各帧参数一致，取参考帧即可。
 ExifTool 不可用时回退：JPG 写基础字段（piexif），TIFF 只写 Make/Model/DateTime（tifffile extratags）。
 

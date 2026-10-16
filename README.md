@@ -19,7 +19,7 @@
   - 主窗口标题栏「🔬 超分」按钮打开独立窗口，也可单独运行 `python sr_gui.py`
   - **自动扫描判定**：给一个几百上千张的照片文件夹（RAW+JPG 混放），自动找出连拍组并判定
     ✅ 可超分（默认勾选）/ 🧊 仅降噪（三脚架）/ ❌ 不可（帧数、抖动、内容运动）/ ✔️ 已完成（不重复合成），勾选后批量合成
-  - 对齐（平移+旋转+光度校正）→ SR 网格鲁棒融合，输出 16-bit TIFF + JPG 预览；**参考帧完整 EXIF 自动继承**（ExifTool，含镜头型号——Lightroom 打开即自动挂镜头矫正配置）
+  - 对齐（平移+旋转+光度校正）→ SR 网格鲁棒融合，RAW 组默认输出 **Linear DNG 母版**——Lightroom 里 Kelvin 色温、相机配置文件、镜头矫正全部可调（Adobe Super Resolution 同款思路），另附 sRGB JPG 预览；完整 EXIF 自动继承（ExifTool，含镜头型号）
   - 手持连拍 16-25 张、每帧有自然亚像素位移时，可合成出真实细节超过单帧的超分图
   - 可选依赖：`rawpy`、`opencv-python`、`tifffile`、`piexif`（仅超分功能需要，缺了不影响水印和 EXIF 功能）
   - 算法细节见 [docs/super_res/README.md](docs/super_res/README.md)

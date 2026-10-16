@@ -21,8 +21,12 @@ from align import align_all_frames, align_frame, find_best_ref_frame
 from super_res import enhance_sharpness, denoise
 
 
-def read_raw_full(raw_path):
-    """读取完整 RGB（支持 RAW 和 JPG/PNG/TIFF）"""
+def read_raw_full(raw_path, camera_space=False):
+    """读取完整 RGB（支持 RAW 和 JPG/PNG/TIFF）
+
+    camera_space=True 时 RAW 走线性相机原生色彩空间（Linear DNG 融合用），
+    JPG/PNG/TIFF 无相机空间，忽略该参数。
+    """
     path = str(raw_path).lower()
     if path.endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff')):
         img = cv2.imread(str(raw_path), cv2.IMREAD_UNCHANGED)
@@ -39,6 +43,8 @@ def read_raw_full(raw_path):
         else:
             return img.astype(np.float32)
     else:
+        if camera_space:
+            return read_raw_camera_linear(raw_path)
         raw = rawpy.imread(str(raw_path))
         rgb = raw.postprocess(
             demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
@@ -103,6 +109,143 @@ def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
            '-EXIF:all', '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
            f'-ExifImageWidth={width}', f'-ExifImageHeight={height}',
            '-overwrite_original', '-q', str(target_path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=120)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+# ===== Linear DNG 母版输出（LR 可调 Kelvin 色温）=====
+# 设计见 docs/superpowers/specs/2026-10-16-linear-dng-design.md
+
+RAW_EXTS = ('.arw', '.cr2', '.cr3', '.nef', '.orf', '.raf', '.dng', '.rw2')
+
+# XYZ(D65) -> sRGB，标准值
+_XYZ_TO_SRGB = np.array([[3.2404542, -1.5371385, -0.4985314],
+                         [-0.9692660, 1.8760108, 0.0415560],
+                         [0.0556434, -0.2040259, 1.0572252]])
+
+
+def neutral_from_cam_mul(cam_mul):
+    """rawpy camera_whitebalance(R,G,B,G2) -> AsShotNeutral（取倒数）"""
+    m = [float(v) for v in list(cam_mul)[:3]]
+    if len(m) < 3 or min(m) <= 0:
+        return None
+    return [1.0 / v for v in m]
+
+
+def read_raw_camera_linear(raw_path, half_size=False, use_camera_wb=False):
+    """线性相机原生 RGB 解码（ColorSpace.raw、gamma=1，供 Linear DNG 融合）
+
+    libraw 的 scale_colors 即便在 raw 色彩空间也会把 WB 乘数烙进数据——
+    use_camera_wb=True 时烙 as-shot 乘数，False 时烙 daylight 乘数；
+    两种解码的通道中位数比值即 AsShotNeutral（见 measure_as_shot_neutral）。
+    """
+    import rawpy
+    raw = rawpy.imread(str(raw_path))
+    try:
+        rgb = raw.postprocess(
+            demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+            half_size=half_size,
+            use_camera_wb=use_camera_wb,
+            use_auto_wb=False,
+            output_bps=16,
+            output_color=rawpy.ColorSpace.raw,
+            no_auto_bright=True,
+            gamma=(1, 1),
+        )
+        return rgb.astype(np.float32) / 65535.0
+    finally:
+        raw.close()
+
+
+def measure_as_shot_neutral(ref_path):
+    """实测 AsShotNeutral：同一帧 raw 色彩空间两种 WB 解码的通道中位数比值
+
+    融合数据用 use_camera_wb=False（烙 daylight 乘数 p），as-shot 还原需要
+    neutral = cam_mul / p；直接用两次解码的比值 r=median(cam)/median(nocam)，
+    连 libraw 内部的归一化细节一起被消掉。异常返回 None（回退元数据换算）。
+    """
+    try:
+        nocam = read_raw_camera_linear(ref_path, half_size=True, use_camera_wb=False)
+        cam = read_raw_camera_linear(ref_path, half_size=True, use_camera_wb=True)
+        mn = np.median(nocam.reshape(-1, 3), axis=0)
+        mc = np.median(cam.reshape(-1, 3), axis=0)
+        ratio = mc / np.maximum(mn, 1e-6)
+        if not np.isfinite(ratio).all():
+            return None
+        return [float(np.clip(v, 0.25, 4.0)) for v in ratio]
+    except Exception:
+        return None
+
+
+def extract_dng_metadata(raw_path):
+    """从 RAW 提取 DNG 色彩元数据（XYZ→相机矩阵 + 机型）；非 RAW 或异常返回 None"""
+    try:
+        import rawpy
+        with rawpy.imread(str(raw_path)) as raw:
+            m = np.array(raw.rgb_xyz_matrix, dtype=np.float64)[:3, :3]
+            if m.shape != (3, 3) or not np.isfinite(m).all() or abs(np.linalg.det(m)) < 1e-6:
+                return None
+        # 机型从 EXIF 读（rawpy 0.27 的 other 结构不含 make/model）
+        import exifread
+        with open(str(raw_path), 'rb') as f:
+            tags = exifread.process_file(f, details=False, stop_tag='Image Model')
+        model = str(tags.get('Image Model', '')).strip()
+        if not model:
+            return None
+        return {'matrix': m.tolist(), 'model': model}
+    except Exception:
+        return None
+
+
+def render_srgb_preview(linear_camera, color_matrix, as_shot_neutral):
+    """线性相机 RGB -> WB -> XYZ -> sRGB(D65) -> gamma，uint8 预览
+
+    只用于 JPG 预览（带轻度自动拉伸）；母版 DNG 保持线性原样，调色留给 LR。
+    """
+    rgb = linear_camera.astype(np.float64) * np.asarray(as_shot_neutral, np.float64)
+    cam_to_xyz = np.linalg.inv(np.asarray(color_matrix, np.float64))
+    srgb = (rgb @ cam_to_xyz.T) @ _XYZ_TO_SRGB.T
+    srgb = np.clip(srgb, 0, 1)
+    out = np.where(srgb <= 0.0031308, 12.92 * srgb,
+                   1.055 * np.power(srgb, 1 / 2.4) - 0.055)
+    lo, hi = np.percentile(out, 0.1), np.percentile(out, 99.9)
+    if hi - lo > 0.02:
+        # 直方图有实际动态范围才拉伸；近均匀图上 (out-lo)/(hi-lo) 会把浮点
+        # 舍入差放大成满档色偏（测试抓到过：均匀灰渲染成品红）
+        out = np.clip((out - lo) / (hi - lo), 0, 1)
+    return (out * 255 + 0.5).astype(np.uint8)
+
+
+def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model, exiftool):
+    """写 Linear DNG：tifffile 出图像数据（LinearRaw + zlib），ExifTool 补 DNG 标签集
+
+    LR/ACR 打开后即为 raw：Kelvin 色温、相机配置文件、镜头矫正全部可用。
+    """
+    import subprocess
+    path = Path(path)
+    h, w = arr_u16.shape[:2]
+    tifffile.imwrite(str(path), arr_u16, photometric=34892, compression='zlib')
+    m = ' '.join(f'{float(v):.6g}' for v in np.asarray(color_matrix).ravel())
+    n = ' '.join(f'{float(v):.6g}' for v in as_shot_neutral)
+    cmd = [exiftool,
+           '-DNGVersion=1.4.0.0',
+           '-DNGBackwardVersion=1.4.0.0',
+           f'-UniqueCameraModel={camera_model}',
+           f'-ColorMatrix1={m}',
+           '-CalibrationIlluminant1=D65',
+           f'-AsShotNeutral={n}',
+           '-BlackLevel=0',
+           '-WhiteLevel=65535',
+           '-DefaultScale=1 1',
+           '-DefaultCropOrigin=0 0',
+           f'-DefaultCropSize={w} {h}',
+           f'-ActiveArea=0 0 {h} {w}',
+           '-BaselineExposure=0', '-BaselineNoise=0', '-BaselineSharpness=0',
+           '-Orientation=1',
+           '-overwrite_original', '-q', str(path)]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=120)
         return r.returncode == 0
@@ -249,7 +392,7 @@ def _refine_euclidean(ref_half, frm_half, dx_full, dy_full, crop_ratio=0.55):
     return warp, fx0, fy0, x0, y0
 
 
-def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024):
+def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False):
     """
     超分辨率重建 v2：SR 网格直接融合
 
@@ -263,6 +406,9 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024):
          落在超分网格的不同亚相位上，融合才可能真正增加细节
       4. 分块鲁棒融合：以逐像素中位数为锚压低离群帧（运动/鬼影），
          替代旧版的高斯掩码
+
+    camera_linear=True 时帧按线性相机原生色彩空间解码（Linear DNG 用），
+    融合结果保持线性、不做任何显示变换。
     """
     n = len(raw_files)
 
@@ -270,7 +416,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024):
     print("  读入帧缓存 (uint16)...")
     frames = []
     for f in raw_files:
-        img = read_raw_full(f)
+        img = read_raw_full(f, camera_space=camera_linear)
         frames.append((np.clip(img, 0.0, 1.0) * 65535.0).astype(np.uint16))
         del img
         gc.collect()
@@ -513,7 +659,13 @@ def reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost):
 
 def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
-            use_legacy=False, tile=1024, threads=0, master_scale=None):
+            use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None):
+    """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
+
+    DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
+    不做锐化/降噪/gamma/自动拉伸（调色全部留给 LR，白平衡可调 Kelvin）。
+    JPG 组或 ExifTool 缺失时回退 sRGB TIF+JPG。
+    """
     if threads and threads > 0:
         # 限制计算线程数（如只用 P 核 8 线程，控制功耗温度；0 = 全部核心）
         cv2.setNumThreads(int(threads))
@@ -553,12 +705,74 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
     )
     print(f"  使用 {len(raw_files)} 帧, 参考帧: {ref_idx}")
 
+    # DNG 可用性判定（需在重建前定：决定解码色彩域）
+    et = None
+    try:
+        from exif_reader import find_exiftool
+        et = find_exiftool()
+    except Exception:
+        et = None
+    dng_meta = None
+    as_shot_neutral = None
+    use_dng = False
+    if output_dng is not False and et and not use_legacy:
+        if all(Path(str(f)).suffix.lower() in RAW_EXTS for f in raw_files):
+            dng_meta = extract_dng_metadata(raw_files[ref_idx])
+            if dng_meta:
+                as_shot_neutral = measure_as_shot_neutral(raw_files[ref_idx])
+                if as_shot_neutral is None:
+                    import rawpy as _rp
+                    with _rp.imread(str(raw_files[ref_idx])) as _raw:
+                        as_shot_neutral = neutral_from_cam_mul(_raw.camera_whitebalance)
+                use_dng = as_shot_neutral is not None
+    if output_dng and not use_dng and not use_legacy:
+        print("  提示: DNG 母版不可用（JPG 组 / 缺 ExifTool / 元数据异常），输出 sRGB TIF")
+
     # 超分重建
-    print(f"\n[3/4] 超分辨率重建 (x{scale}, {'旧版对齐融合' if use_legacy else 'SR网格鲁棒融合'})...")
+    print(f"\n[3/4] 超分辨率重建 (x{scale}, "
+          f"{'旧版对齐融合' if use_legacy else 'SR网格鲁棒融合'}"
+          f"{', 线性相机域' if use_dng else ''})...")
     if use_legacy:
         sr_result, (orig_w, orig_h) = reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost)
     else:
-        sr_result, (orig_w, orig_h) = reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile)
+        sr_result, (orig_w, orig_h) = reconstruct(raw_files, shifts, ref_idx, scale, use_deghost,
+                                                  tile, camera_linear=use_dng)
+
+    base = str(output_path).rsplit('.', 1)[0]
+    ref_frame = raw_files[ref_idx]
+
+    if use_dng:
+        # [4/4] Linear DNG 母版：不做锐化/降噪/gamma/自动拉伸，白平衡与调色留给 LR
+        print("\n[4/4] 输出 Linear DNG 母版（线性数据，调色/降噪/锐化全部留给 LR）...")
+        out_h, out_w = sr_result.shape[:2]
+        arr_u16 = (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)
+        dng_path = base + f'_{scale}x.dng'
+        if not write_linear_dng(dng_path, arr_u16, dng_meta['matrix'], as_shot_neutral,
+                                dng_meta['model'], et):
+            raise RuntimeError(f"DNG 写入失败: {dng_path}")
+        dng_mb = Path(dng_path).stat().st_size / (1024*1024)
+        if copy_exif_from_frame(et, ref_frame, dng_path, width=out_w, height=out_h):
+            print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版, 完整EXIF已继承)")
+        else:
+            print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版)")
+
+        # JPG 预览（WB -> XYZ -> sRGB；轻度拉伸仅用于预览）
+        jpg_path = base + f'_{scale}x.jpg'
+        preview = render_srgb_preview(sr_result, dng_meta['matrix'], as_shot_neutral)
+        ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(preview, cv2.COLOR_RGB2BGR),
+                                   [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if ok:
+            Path(jpg_path).write_bytes(jpg_buf.tobytes())
+        copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h)
+        jpg_mb = Path(jpg_path).stat().st_size / (1024*1024)
+        print(f"  JPG:  {jpg_path} ({jpg_mb:.0f}MB, sRGB 预览)")
+
+        elapsed = time.time() - t0
+        print(f"\n{'=' * 60}")
+        print(f"完成！ {orig_w}x{orig_h} → {out_w}x{out_h} (Linear DNG)")
+        print(f"耗时: {elapsed:.1f} 秒")
+        print(f"{'=' * 60}")
+        return
 
     # 后处理
     print("\n[4/4] 后处理...")
@@ -635,17 +849,10 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
     # 完整 EXIF 继承：优先用 ExifTool 把参考帧 EXIF 整体拷到输出（含镜头型号，
     # Lightroom 据此自动挂镜头矫正配置；连拍各帧 EXIF 一致，取参考帧即可）。
     # ExifTool 不可用/失败时回退：JPG 走 piexif 基础字段，TIFF 保持 tifffile extratags。
-    et = None
-    try:
-        from exif_reader import find_exiftool
-        et = find_exiftool()
-    except Exception:
-        et = None
-    ref_frame = raw_files[ref_idx]
+    # （et / ref_frame 已在 DNG 判定阶段就绪）
     out_h, out_w = sr_result.shape[:2]
 
     # 保存调色母版与 JPG（母版可选缩放 TIF，LR/PS 可完整调色；JPG 全尺寸分享用）
-    base = str(output_path).rsplit('.', 1)[0]
     exif_tags = build_tiff_exif_tags(exif_data)
     if master_scale and float(master_scale) < float(scale):
         k = float(master_scale) / float(scale)

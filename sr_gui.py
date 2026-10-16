@@ -93,6 +93,9 @@ class App:
             ttk.Label(f3, text=lab).pack(side='left', padx=(10, 2))
             ttk.Entry(f3, textvariable=var, width=w).pack(side='left')
         ttk.Checkbutton(f3, text='去鬼影', variable=self.var_deghost).pack(side='left', padx=(14, 2))
+        # DNG 母版：LR 里 Kelvin 色温/相机配置/镜头矫正全可用（RAW 组生效，JPG 组自动回退 TIF）
+        self.var_dng = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f3, text='DNG母版(色温可调)', variable=self.var_dng).pack(side='left', padx=2)
         # 1.5x 压缩母版是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
         self.var_master = tk.BooleanVar(value=False)
         ttk.Checkbutton(f3, text='1.5x压缩母版TIF', variable=self.var_master).pack(side='left', padx=6)
@@ -242,15 +245,18 @@ class App:
                 self.q.put('__DONE__')
         threading.Thread(target=work, daemon=True).start()
 
-    def _unique_base(self, dst, tstr, gi, scale, master):
+    def _unique_base(self, dst, tstr, gi, scale, master, use_dng):
         """输出名冲突时追加 _2/_3（已合成的组重做时会走到这里）"""
         n = 1
         while True:
             suffix = '' if n == 1 else f'_{n}'
             base = Path(dst) / f'组{gi:02d}_{tstr}{suffix}'
-            taken = [Path(f'{base}_{scale}x.jpg'), Path(f'{base}.tif')]
-            if master:
-                taken.append(Path(f'{base}_{master}x.tif'))
+            if use_dng:
+                taken = [Path(f'{base}_{scale}x.dng'), Path(f'{base}_{scale}x.jpg')]
+            else:
+                taken = [Path(f'{base}_{scale}x.jpg'), Path(f'{base}.tif')]
+                if master:
+                    taken.append(Path(f'{base}_{master}x.tif'))
             if not any(p.exists() for p in taken):
                 return base
             n += 1
@@ -269,7 +275,8 @@ class App:
             return
         # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
         scale = self.var_scale.get()
-        master = 1.5 if self.var_master.get() else None
+        use_dng = self.var_dng.get()
+        master = 1.5 if (self.var_master.get() and not use_dng) else None
         topk = self.var_topk.get()
         deghost = self.var_deghost.get()
         sharpen = self.var_sharpen.get()
@@ -296,7 +303,7 @@ class App:
                     fp = group_fingerprint(v.files)
                     tstr = datetime.datetime.fromtimestamp(v.start_time).strftime('%H%M%S') \
                         if v.start_time else f'{gi:02d}0000'
-                    base = self._unique_base(dst, tstr, gi, scale, master)
+                    base = self._unique_base(dst, tstr, gi, scale, master, use_dng)
                     self.q.put(f'[{k}/{total}] 组{gi:02d} {len(v.files)}帧: 合成中…')
                     tmp = Path(dst) / f'.tmp_g{gi}'
                     tmp.mkdir(exist_ok=True)
@@ -310,7 +317,8 @@ class App:
                                     use_deghost=deghost,
                                     sharpen=sharpen,
                                     threads=threads,
-                                    master_scale=master)
+                                    master_scale=master,
+                                    output_dng=use_dng)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:
@@ -323,17 +331,21 @@ class App:
                         continue
                     clean_tmp(tmp)
                     jpg = Path(f'{base}_{scale}x.jpg')
-                    kept_tif = None
-                    if master:
+                    kept_master = None
+                    dng_path = Path(f'{base}_{scale}x.dng')
+                    if use_dng and dng_path.exists():
+                        kept_master = dng_path
+                    elif master:
                         p = Path(f'{base}_{master}x.tif')
-                        kept_tif = p if p.exists() else None
+                        kept_master = p if p.exists() else None
                     elif keep_tif:
                         p = Path(f'{base}.tif')
-                        kept_tif = p if p.exists() else None
+                        kept_master = p if p.exists() else None
                     else:
                         Path(str(base) + '.tif').unlink(missing_ok=True)
-                    record_done(dst, fp, jpg, kept_tif)
-                    self.q.put(f'  完成 {t} -> {jpg.name}')
+                    record_done(dst, fp, jpg, kept_master)
+                    master_name = kept_master.name if kept_master else '无母版'
+                    self.q.put(f'  完成 {t} -> {jpg.name} / {master_name}')
                 self.q.put('全部完成！输出在: ' + dst)
                 self.q.put('__DONE__')
             except Exception:
