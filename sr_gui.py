@@ -3,9 +3,10 @@
 """
 手持多帧超分辨率合成 · 连拍分组版（GUI）
 
-选择包含 RAW 连拍的文件夹 -> 自动按拍摄时间分组 -> 每组自动选最锐的帧 -> 合成
+选择包含 RAW/JPG 连拍的文件夹 -> 自动按拍摄时间分组 -> 逐组判定能否超分 -> 勾选合成
 
 - 作为水印工具的子窗口打开（open_sr_window），也可独立运行（python sr_gui.py）
+- 判定与防重复引擎见 sr_suggest.py（设计：docs/superpowers/specs/2026-10-16-sr-suggest-design.md）
 """
 import os
 import sys
@@ -23,7 +24,9 @@ if _threads_cfg > 0:
     for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
         os.environ[_v] = str(_threads_cfg)
 
+import datetime
 import queue
+import shutil
 import threading
 import traceback
 from pathlib import Path
@@ -32,23 +35,34 @@ import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 
 sys.path.insert(0, str(Path(__file__).parent))
-import burst_tools
+import sr_suggest
+from sr_suggest import scan_and_judge, group_fingerprint, record_done
+
+# 判定 -> (表格显示, 着色 tag)
+STATUS_DISPLAY = {
+    'ok': ('✅ 可超分', 'ok'),
+    'denoise_only': ('🧊 仅降噪', 'denoise'),
+    'no': ('❌ 不可超分', 'no'),
+    'done': ('✔️ 已完成', 'done'),
+}
 
 
 class App:
     def __init__(self, root):
         self.root = root
         root.title('手持多帧超分辨率合成（连拍分组版）')
-        root.geometry('860x640')
+        root.geometry('960x700')
         self.q = queue.Queue()
-        self.groups = []
+        self.verdicts = []          # sr_suggest.Verdict 列表（与表格行号一一对应）
+        self.checked = set()        # 勾选的组号（1 起）
+        self._cancel = False
         self._build()
         self.root.after(100, self._poll)
 
     def _build(self):
         pad = dict(padx=8, pady=4)
         f1 = ttk.Frame(self.root); f1.pack(fill='x', **pad)
-        ttk.Label(f1, text='RAW 文件夹:').pack(side='left')
+        ttk.Label(f1, text='照片文件夹:').pack(side='left')
         self.var_src = tk.StringVar(value=str(Path.home() / 'Pictures'))
         ttk.Entry(f1, textvariable=self.var_src).pack(side='left', fill='x', expand=True, padx=6)
         ttk.Button(f1, text='浏览…', command=self._pick_src).pack(side='left')
@@ -70,8 +84,8 @@ class App:
         self.var_threads = tk.IntVar(value=max(_threads_cfg, 0))
         for lab, var, w, tip in [
             ('组内最大间隔(秒)', self.var_gap, 6, '连拍组内相邻两帧的最大时间间隔；大于此间隔算新的一组'),
-            ('每组最少帧数', self.var_min, 5, '少于此帧数的组不处理'),
-            ('每组最多用帧', self.var_topk, 5, '每组按清晰度选出最锐的前 k 帧'),
+            ('每组最少帧数', self.var_min, 5, '少于此帧数的组不进表格（计入散照）'),
+            ('每组最多用帧', self.var_topk, 5, '合成时每组最多用的帧数（自动选最锐的）'),
             ('放大倍率', self.var_scale, 5, '输出 = 输入分辨率 × 倍率'),
             ('锐化强度', self.var_sharpen, 5, '0-1，0 为不锐化'),
             ('核心数', self.var_threads, 5, '0=全部核心；填 8 只用 P 核，功耗温度大幅下降'),
@@ -84,17 +98,40 @@ class App:
         ttk.Checkbutton(f3, text='另存全尺寸TIF(很大)', variable=self.var_keep_tif).pack(side='left', padx=2)
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
-        ttk.Button(f4, text='① 检测连拍分组', command=self._detect).pack(side='left', padx=4)
-        ttk.Button(f4, text='② 合成全部组', command=self._run).pack(side='left', padx=4)
+        ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)
+        ttk.Button(f4, text='② 合成选中组', command=self._run).pack(side='left', padx=4)
+        btn_cancel = ttk.Button(f4, text='取消', command=self._cancel_scan)
+        btn_cancel.pack(side='left', padx=4)
+        btn_cancel.skip_set = True  # 扫描中其他按钮禁用时它必须可用
         self.var_status = tk.StringVar(value='就绪')
         ttk.Label(f4, textvariable=self.var_status, foreground='#0a7').pack(side='left', padx=16)
 
-        ttk.Label(self.root, text='分组结果:').pack(anchor='w', padx=10)
-        self.txt = tk.Text(self.root, height=24)
-        self.txt.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        self.var_summary = tk.StringVar(value='先「① 扫描并判定」，可超分的组默认勾选')
+        ttk.Label(self.root, textvariable=self.var_summary,
+                  foreground='#555').pack(anchor='w', padx=10)
+
+        # 判定结果表（点击行切换勾选）
+        cols = ('check', 'gi', 'time', 'frames', 'status', 'reason')
+        self.tree = ttk.Treeview(self.root, columns=cols, show='headings', height=14)
+        for cid, text, w, anchor in [
+            ('check', '勾', 36, 'center'), ('gi', '组', 44, 'center'),
+            ('time', '拍摄时间', 80, 'center'), ('frames', '帧数', 50, 'center'),
+            ('status', '判定', 100, 'center'), ('reason', '说明', 520, 'w'),
+        ]:
+            self.tree.heading(cid, text=text)
+            self.tree.column(cid, width=w, anchor=anchor, stretch=(cid == 'reason'))
+        self.tree.tag_configure('ok', foreground='#0a7')
+        self.tree.tag_configure('denoise', foreground='#369')
+        self.tree.tag_configure('no', foreground='#c33')
+        self.tree.tag_configure('done', foreground='#888')
+        self.tree.pack(fill='both', expand=False, padx=10, pady=(4, 2))
+        self.tree.bind('<ButtonRelease-1>', self._on_tree_click)
+
+        self.txt = tk.Text(self.root, height=8)
+        self.txt.pack(fill='both', expand=True, padx=10, pady=(2, 10))
 
     def _pick_src(self):
-        p = filedialog.askdirectory(title='选择 RAW 连拍文件夹')
+        p = filedialog.askdirectory(title='选择照片文件夹（RAW/JPG 连拍混放即可）')
         if p:
             self.var_src.set(p)
             if not self.var_dst.get():
@@ -117,6 +154,8 @@ class App:
                 if msg == '__DONE__':
                     self.var_status.set('完成')
                     self._set_buttons(True)
+                elif isinstance(msg, tuple) and msg[0] == '__VERDICTS__':
+                    self._populate(msg[1], msg[2], msg[3])
                 else:
                     self.log(msg)
         except queue.Empty:
@@ -127,51 +166,118 @@ class App:
         for b in self.root.winfo_children():
             if isinstance(b, ttk.Frame):
                 for c in b.winfo_children():
-                    if isinstance(c, ttk.Button):
+                    if isinstance(c, ttk.Button) and not getattr(c, 'skip_set', False):
                         c['state'] = 'normal' if on else 'disabled'
+
+    def _cancel_scan(self):
+        self._cancel = True
+        self.var_status.set('正在取消…（保留已判定结果）')
+
+    def _on_tree_click(self, _event):
+        if not self.tree.selection():
+            return
+        iid = self.tree.selection()[0]
+        gi = int(iid)
+        values = list(self.tree.item(iid, 'values'))
+        if gi in self.checked:
+            self.checked.discard(gi)
+            values[0] = '☐'
+        else:
+            self.checked.add(gi)
+            values[0] = '☑'
+        self.tree.item(iid, values=values)
+
+    def _populate(self, verdicts, singles, cancelled):
+        self.verdicts = verdicts
+        self.checked = set()
+        self.tree.delete(*self.tree.get_children())
+        counts = {'ok': 0, 'denoise_only': 0, 'no': 0, 'done': 0}
+        for gi, v in enumerate(verdicts, 1):
+            label, tag = STATUS_DISPLAY[v.status]
+            if v.status == 'ok':
+                self.checked.add(gi)
+            tstr = datetime.datetime.fromtimestamp(v.start_time).strftime('%H:%M:%S') \
+                if v.start_time else '--:--:--'
+            self.tree.insert('', 'end', iid=str(gi),
+                             values=('☑' if gi in self.checked else '☐', gi, tstr,
+                                     len(v.files), label, v.reason),
+                             tags=(tag,))
+            counts[v.status] += 1
+        tail = '（已取消，仅显示已判定的组）' if cancelled else ''
+        self.var_summary.set(
+            f"可超分 {counts['ok']} 组 · 仅降噪 {counts['denoise_only']} · "
+            f"不可 {counts['no']} · 已完成 {counts['done']}；另有 {singles} 张散照/小组 {tail}")
 
     def _detect(self):
         src = self.var_src.get().strip()
         if not Path(src).is_dir():
-            messagebox.showerror('错误', 'RAW 文件夹不存在')
+            messagebox.showerror('错误', '照片文件夹不存在')
             return
+        # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
+        dst = self.var_dst.get().strip()
+        gap, min_frames = self.var_gap.get(), self.var_min.get()
         self.txt.delete('1.0', 'end')
-        self.var_status.set('检测分组中…')
+        self.tree.delete(*self.tree.get_children())
+        self.verdicts, self.checked = [], set()
+        self.var_summary.set('扫描中…')
+        self._cancel = False
+        self.var_status.set('扫描判定中…')
         self._set_buttons(False)
 
         def work():
             try:
-                self.q.put(f'扫描 {src} …')
-                groups = burst_tools.scan_folder(src, gap=self.var_gap.get(),
-                                                 min_frames=self.var_min.get())
-                import datetime
-                self.q.put(f'共 {len(groups)} 组连拍，逐组选帧（每组解码约 1-2 秒/帧）…')
-                rows = []
-                for gi, (t0, frames) in enumerate(groups, 1):
-                    kept = burst_tools.select_frames(frames, top_k=self.var_topk.get())
-                    tstr = datetime.datetime.fromtimestamp(t0).strftime('%H:%M:%S')
-                    self.q.put(f'  组{gi}: {tstr} 起 {len(frames)} 帧 → 选 {len(kept)} 帧')
-                    rows.append((gi, tstr, frames, kept))
-                self.groups = rows
-                self.q.put(f'检测完成，共 {len(rows)} 组。点击「② 合成全部组」开始处理。')
+                self.q.put(f'扫描 {src} …（判定每组抽 8 帧，约几秒/组，可随时取消）')
+                verdicts, singles = scan_and_judge(
+                    src,
+                    output_dir=dst or None,   # 给定输出目录时检测已合成过的组
+                    gap=gap,
+                    min_frames=min_frames,
+                    progress_cb=self.q.put,
+                    cancel_cb=lambda: self._cancel)
+                self.q.put(('__VERDICTS__', verdicts, singles, self._cancel))
                 self.q.put('__DONE__')
             except Exception:
-                self.q.put('检测失败:\n' + traceback.format_exc())
+                self.q.put('扫描失败:\n' + traceback.format_exc())
                 self.q.put('__DONE__')
         threading.Thread(target=work, daemon=True).start()
 
+    def _unique_base(self, dst, tstr, gi, scale, master):
+        """输出名冲突时追加 _2/_3（已合成的组重做时会走到这里）"""
+        n = 1
+        while True:
+            suffix = '' if n == 1 else f'_{n}'
+            base = Path(dst) / f'组{gi:02d}_{tstr}{suffix}'
+            taken = [Path(f'{base}_{scale}x.jpg'), Path(f'{base}.tif')]
+            if master:
+                taken.append(Path(f'{base}_{master}x.tif'))
+            if not any(p.exists() for p in taken):
+                return base
+            n += 1
+
     def _run(self):
-        if not self.groups:
-            messagebox.showinfo('提示', '请先「① 检测连拍分组」')
+        if not self.verdicts:
+            messagebox.showinfo('提示', '请先「① 扫描并判定」')
+            return
+        sel = sorted(self.checked)
+        if not sel:
+            messagebox.showinfo('提示', '没有勾选任何组（点击表格行切换勾选）')
             return
         dst = self.var_dst.get().strip()
         if not dst:
             messagebox.showerror('错误', '请设置输出文件夹')
             return
+        # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
+        scale = self.var_scale.get()
+        master = 1.5 if self.var_master.get() else None
+        topk = self.var_topk.get()
+        deghost = self.var_deghost.get()
+        sharpen = self.var_sharpen.get()
+        threads = self.var_threads.get()
+        keep_tif = self.var_keep_tif.get()
         Path(dst).mkdir(parents=True, exist_ok=True)
         try:
             _c2 = configparser.ConfigParser()
-            _c2['run'] = {'threads': str(self.var_threads.get())}
+            _c2['run'] = {'threads': str(threads)}
             with open(os.path.join(_exe_dir, 'sr_gui.ini'), 'w', encoding='utf-8') as f:
                 _c2.write(f)
         except Exception:
@@ -181,26 +287,28 @@ class App:
 
         def work():
             try:
-                import cv2
                 import re
-                sys.path.insert(0, str(Path(__file__).parent))
                 from sr_process import process
-                total = len(self.groups)
-                for gi, tstr, frames, kept in self.groups:
-                    self.q.put(f'[{gi}/{total}] 组{gi} ({tstr}) {len(frames)}帧选{len(kept)}帧: 合成中…')
+                total = len(sel)
+                for k, gi in enumerate(sel, 1):
+                    v = self.verdicts[gi - 1]
+                    fp = group_fingerprint(v.files)
+                    tstr = datetime.datetime.fromtimestamp(v.start_time).strftime('%H%M%S') \
+                        if v.start_time else f'{gi:02d}0000'
+                    base = self._unique_base(dst, tstr, gi, scale, master)
+                    self.q.put(f'[{k}/{total}] 组{gi:02d} {len(v.files)}帧: 合成中…')
                     tmp = Path(dst) / f'.tmp_g{gi}'
                     tmp.mkdir(exist_ok=True)
-                    for p, _s in kept:
-                        shutil_copy(p, tmp / p.name)
-                    base = Path(dst) / f'组{gi:02d}_{tstr.replace(":", "")}'
+                    for p in v.files:
+                        shutil.copy(str(p), str(tmp / p.name))
                     buf = io_log()
-                    master = 1.5 if self.var_master.get() else None
                     try:
                         with Redirector(buf):
-                            process(str(tmp), str(base) + '.tif', scale=self.var_scale.get(),
-                                    use_deghost=self.var_deghost.get(),
-                                    sharpen=self.var_sharpen.get(),
-                                    threads=self.var_threads.get(),
+                            process(str(tmp), str(base) + '.tif', scale=scale,
+                                    max_frames=topk,
+                                    use_deghost=deghost,
+                                    sharpen=sharpen,
+                                    threads=threads,
                                     master_scale=master)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
@@ -213,11 +321,17 @@ class App:
                         clean_tmp(tmp)
                         continue
                     clean_tmp(tmp)
-                    jpg = Path(str(base) + f'_{self.var_scale.get()}x.jpg')
-                    if not self.var_keep_tif.get():
-                        tif = Path(str(base) + '.tif')
-                        if tif.exists():
-                            tif.unlink()
+                    jpg = Path(f'{base}_{scale}x.jpg')
+                    kept_tif = None
+                    if master:
+                        p = Path(f'{base}_{master}x.tif')
+                        kept_tif = p if p.exists() else None
+                    elif keep_tif:
+                        p = Path(f'{base}.tif')
+                        kept_tif = p if p.exists() else None
+                    else:
+                        Path(str(base) + '.tif').unlink(missing_ok=True)
+                    record_done(dst, fp, jpg, kept_tif)
                     self.q.put(f'  完成 {t} -> {jpg.name}')
                 self.q.put('全部完成！输出在: ' + dst)
                 self.q.put('__DONE__')
@@ -227,13 +341,7 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
 
-def shutil_copy(src, dst):
-    import shutil
-    shutil.copy(str(src), str(dst))
-
-
 def clean_tmp(tmp):
-    import shutil
     shutil.rmtree(str(tmp), ignore_errors=True)
 
 
