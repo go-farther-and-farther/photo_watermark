@@ -100,13 +100,17 @@ def build_tiff_exif_tags(exif_data):
 def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
     """把参考帧完整 EXIF（含镜头型号、快门、ISO 等）用 ExifTool 拷到输出文件
 
-    JPG/TIFF 均可（ExifTool 能写 TIFF 的 Exif 子 IFD，补上 tifffile 的短板）；
+    JPG/TIFF/DNG 均可（ExifTool 能写 TIFF 的 Exif 子 IFD，补上 tifffile 的短板）；
     Lightroom 依据 LensModel/LensMake 自动挂镜头矫正配置。
-    拷贝时排除并改写尺寸标签（输出分辨率与源帧不同）。失败返回 False（调用方回退基础 EXIF）。
+    拷贝时排除并改写尺寸标签（输出分辨率与源帧不同）；**排除 MakerNotes 整块移植**
+    ——NEF 的 makernote 内含预览指针，跨文件移植后指向零长度数据
+    （PreviewImageLength=0），Lightroom 的严格解析器会因此拒收整个 DNG。
+    失败返回 False（调用方回退基础 EXIF）。
     """
     import subprocess
     cmd = [exiftool, '-tagsfromfile', str(ref_path),
-           '-EXIF:all', '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
+           '-EXIF:all', '--MakerNotes', '--PreviewImage',
+           '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
            f'-ExifImageWidth={width}', f'-ExifImageHeight={height}',
            '-overwrite_original', '-q', str(target_path)]
     try:
