@@ -29,8 +29,13 @@ python sr_process.py \
 
 | 格式 | 说明 |
 |------|------|
-| 16-bit TIFF | 无压缩，可直接进 Lightroom 调色；EXIF 写入 Make/Model/拍摄时间（快门/ISO/镜头等在 Exif 子 IFD，tifffile 不支持写，完整 EXIF 见 JPG） |
-| JPG | 预览用，quality 90，带完整 EXIF |
+| 16-bit TIFF | 无压缩，可直接进 Lightroom 调色 |
+| JPG | 预览用，quality 90 |
+
+**EXIF 继承**：装有 ExifTool（水印工具已内置查找）时，参考帧的完整 EXIF——镜头型号、
+快门、ISO、焦距等——整体拷入 TIF 和 JPG（尺寸标签改写为输出实际值）。Lightroom 打开后
+依据 LensModel **自动挂镜头矫正配置**，拍摄信息完整可检索。连拍各帧参数一致，取参考帧即可。
+ExifTool 不可用时回退：JPG 写基础字段（piexif），TIFF 只写 Make/Model/DateTime（tifffile extratags）。
 
 ## 算法概述
 

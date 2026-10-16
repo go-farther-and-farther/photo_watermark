@@ -23,6 +23,14 @@ from align import estimate_shift  # noqa: E402
 import sr_process  # noqa: E402
 
 
+def _find_exiftool_or_skip():
+    from exif_reader import find_exiftool
+    et = find_exiftool()
+    if not et:
+        pytest.skip("exiftool 不可用")
+    return et
+
+
 def _base_image(w=320, h=240, seed=7):
     """高密集纹理的合成图：相位相关需要丰富的高频信息"""
     rng = np.random.default_rng(seed)
@@ -93,3 +101,64 @@ class TestProcess:
         jimg = cv2.imread(str(jpg))
         assert jimg is not None
         assert (jimg.shape[0], jimg.shape[1]) == (out_h, out_w)
+
+
+class TestExifCopy:
+    """参考帧完整 EXIF（含镜头型号）经 ExifTool 拷到输出文件"""
+
+    def _make_source(self, path):
+        """带镜头/快门/ISO 的源帧（模拟参考帧）"""
+        import piexif
+        frame = (np.clip(_base_image(), 0, 1) * 255).astype(np.uint8)
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode('.jpg', bgr)
+        assert ok
+        Path(path).write_bytes(buf.tobytes())
+        exif = piexif.dump({
+            "0th": {piexif.ImageIFD.Make: b"Nikon", piexif.ImageIFD.Model: b"NIKON Z 6"},
+            "Exif": {
+                piexif.ExifIFD.DateTimeOriginal: b"2026:10:16 09:00:00",
+                piexif.ExifIFD.ExposureTime: (1, 250),
+                piexif.ExifIFD.ISOSpeedRatings: 3600,
+                piexif.ExifIFD.FNumber: (28, 10),
+                piexif.ExifIFD.FocalLength: (5000, 100),
+                piexif.ExifIFD.LensMake: b"NIKON",
+                piexif.ExifIFD.LensModel: b"NIKKOR Z 50mm f/1.8 S",
+            },
+        })
+        piexif.insert(exif, str(path))
+
+    def test_copy_full_exif_with_output_dims(self, tmp_path):
+        et = _find_exiftool_or_skip()
+        src = tmp_path / "ref.jpg"
+        self._make_source(src)
+        out = tmp_path / "result_2x.jpg"
+        frame = np.full((120, 160, 3), 200, np.uint8)
+        ok, buf = cv2.imencode('.jpg', frame)
+        Path(out).write_bytes(buf.tobytes())
+
+        assert sr_process.copy_exif_from_frame(et, src, out, width=160, height=120)
+
+        import exifread
+        with open(out, 'rb') as f:
+            tags = exifread.process_file(f, details=False)
+        assert 'NIKKOR Z 50mm' in str(tags.get('EXIF LensModel', ''))
+        assert str(tags.get('EXIF ISOSpeedRatings', '')) == '3600'
+        assert 'EXIF ExposureTime' in tags
+        # 尺寸标签改写为输出实际值，而不是源帧的（exifread 键名：Width/Length）
+        assert int(str(tags.get('EXIF ExifImageWidth', '0'))) == 160
+        assert int(str(tags.get('EXIF ExifImageLength', '0'))) == 120
+
+    def test_copy_to_tiff(self, tmp_path):
+        et = _find_exiftool_or_skip()
+        src = tmp_path / "ref.jpg"
+        self._make_source(src)
+        out = tmp_path / "result.tif"
+        tifffile.imwrite(str(out), np.zeros((120, 160, 3), dtype=np.uint16))
+
+        assert sr_process.copy_exif_from_frame(et, src, out, width=160, height=120)
+
+        import exifread
+        with open(out, 'rb') as f:
+            tags = exifread.process_file(f, details=False)
+        assert 'NIKKOR Z 50mm' in str(tags.get('EXIF LensModel', ''))

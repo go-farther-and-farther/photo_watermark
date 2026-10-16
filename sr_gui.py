@@ -80,7 +80,7 @@ class App:
         self.var_scale = tk.IntVar(value=2)
         self.var_sharpen = tk.DoubleVar(value=0.3)
         self.var_deghost = tk.BooleanVar(value=True)
-        self.var_keep_tif = tk.BooleanVar(value=False)
+        self.var_keep_tif = tk.BooleanVar(value=True)
         self.var_threads = tk.IntVar(value=max(_threads_cfg, 0))
         for lab, var, w, tip in [
             ('组内最大间隔(秒)', self.var_gap, 6, '连拍组内相邻两帧的最大时间间隔；大于此间隔算新的一组'),
@@ -93,9 +93,10 @@ class App:
             ttk.Label(f3, text=lab).pack(side='left', padx=(10, 2))
             ttk.Entry(f3, textvariable=var, width=w).pack(side='left')
         ttk.Checkbutton(f3, text='去鬼影', variable=self.var_deghost).pack(side='left', padx=(14, 2))
-        self.var_master = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3, text='1.5x调色母版TIF', variable=self.var_master).pack(side='left', padx=6)
-        ttk.Checkbutton(f3, text='另存全尺寸TIF(很大)', variable=self.var_keep_tif).pack(side='left', padx=2)
+        # 1.5x 压缩母版是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
+        self.var_master = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f3, text='1.5x压缩母版TIF', variable=self.var_master).pack(side='left', padx=6)
+        ttk.Checkbutton(f3, text='另存全尺寸TIF', variable=self.var_keep_tif).pack(side='left', padx=2)
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
         ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)

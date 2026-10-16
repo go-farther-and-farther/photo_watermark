@@ -91,6 +91,25 @@ def build_tiff_exif_tags(exif_data):
     return tags
 
 
+def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
+    """把参考帧完整 EXIF（含镜头型号、快门、ISO 等）用 ExifTool 拷到输出文件
+
+    JPG/TIFF 均可（ExifTool 能写 TIFF 的 Exif 子 IFD，补上 tifffile 的短板）；
+    Lightroom 依据 LensModel/LensMake 自动挂镜头矫正配置。
+    拷贝时排除并改写尺寸标签（输出分辨率与源帧不同）。失败返回 False（调用方回退基础 EXIF）。
+    """
+    import subprocess
+    cmd = [exiftool, '-tagsfromfile', str(ref_path),
+           '-EXIF:all', '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
+           f'-ExifImageWidth={width}', f'-ExifImageHeight={height}',
+           '-overwrite_original', '-q', str(target_path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=120)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def find_input_files(folder_path):
     """查找输入文件（RAW + JPG/PNG/TIFF）"""
     folder = Path(folder_path)
@@ -613,7 +632,19 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
     except Exception as e:
         print(f"  JPG EXIF 构造失败: {e}")
 
-    # 保存调色母版与 JPG（母版默认 1.5x 压缩 TIF，LR/PS 可完整调色；JPG 全尺寸分享用）
+    # 完整 EXIF 继承：优先用 ExifTool 把参考帧 EXIF 整体拷到输出（含镜头型号，
+    # Lightroom 据此自动挂镜头矫正配置；连拍各帧 EXIF 一致，取参考帧即可）。
+    # ExifTool 不可用/失败时回退：JPG 走 piexif 基础字段，TIFF 保持 tifffile extratags。
+    et = None
+    try:
+        from exif_reader import find_exiftool
+        et = find_exiftool()
+    except Exception:
+        et = None
+    ref_frame = raw_files[ref_idx]
+    out_h, out_w = sr_result.shape[:2]
+
+    # 保存调色母版与 JPG（母版可选缩放 TIF，LR/PS 可完整调色；JPG 全尺寸分享用）
     base = str(output_path).rsplit('.', 1)[0]
     exif_tags = build_tiff_exif_tags(exif_data)
     if master_scale and float(master_scale) < float(scale):
@@ -624,17 +655,24 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         master_path = f'{base}_{master_scale}x.tif'
         # zlib 无损压缩: 1.5x 母版约 250-350MB（全尺寸 2x 无压缩要 1GB）
         tifffile.imwrite(master_path, master, extratags=exif_tags, compression='zlib')
-        print(f"  调色母版 TIF: {master_path} ({mw}x{mh}, "
-              f"{Path(master_path).stat().st_size/(1024*1024):.0f}MB)")
+        if et and copy_exif_from_frame(et, ref_frame, master_path, width=mw, height=mh):
+            print(f"  调色母版 TIF: {master_path} ({mw}x{mh}, "
+                  f"{Path(master_path).stat().st_size/(1024*1024):.0f}MB, 完整EXIF已继承)")
+        else:
+            print(f"  调色母版 TIF: {master_path} ({mw}x{mh}, "
+                  f"{Path(master_path).stat().st_size/(1024*1024):.0f}MB)")
     else:
         # tifffile 按数组通道顺序原样写入，必须保持 RGB（不能转 BGR，否则红蓝互换）
         tiff_path = base + '.tif'
         img_tiff = (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)
         tifffile.imwrite(tiff_path, img_tiff, extratags=exif_tags)
         tiff_size = Path(tiff_path).stat().st_size / (1024*1024)
-        print(f"  TIFF: {tiff_path} ({tiff_size:.0f}MB)")
+        if et and copy_exif_from_frame(et, ref_frame, tiff_path, width=out_w, height=out_h):
+            print(f"  TIFF: {tiff_path} ({tiff_size:.0f}MB, 完整EXIF已继承)")
+        else:
+            print(f"  TIFF: {tiff_path} ({tiff_size:.0f}MB)")
 
-    # 保存 JPG（预览用，复用 TIFF 的 EXIF）
+    # 保存 JPG（预览用）
     jpg_path = base + f'_{scale}x.jpg'
     img_jpg = (np.clip(sr_result, 0, 1) * 255).astype(np.uint8)
     img_jpg = cv2.cvtColor(img_jpg, cv2.COLOR_RGB2BGR)
@@ -645,8 +683,10 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
     else:
         print(f"  警告: JPG 编码失败")
 
-    # 复制 EXIF 到 JPG
-    if exif_bytes:
+    # 复制 EXIF 到 JPG：优先参考帧完整字段，回退 piexif 基础字段
+    if et and copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h):
+        pass
+    elif exif_bytes:
         try:
             piexif.insert(exif_bytes, jpg_path)
         except Exception as e:
