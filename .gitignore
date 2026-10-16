@@ -62,3 +62,9 @@ Reference/
 
 # 本地开发技术文档（不计入 git）
 devdocs/
+
+# 构建产物（发布走 GitHub Releases，不入库）
+*.exe
+
+# 布局截图工具输出（人工查看用，不入库）
+devtests/layout_shot.png
