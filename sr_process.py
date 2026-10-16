@@ -484,12 +484,12 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     gc.collect()
 
     # 剔除运动帧: 对齐后差异区域超过 15% 的帧整帧不用（人物走动/动物等）。
-    # 去鬼影依赖中位数锚定，至少需要 3 个一致帧，否则残余运动会以半强度鬼影出现。
+    # 去鬼影依赖中位数锚定，四帧起才稳（与 sr_suggest.MIN_COMPOSE_FRAMES 一致）。
     usable = [i for i in range(n) if motion_frac[i] <= 0.15]
     for i in range(n):
         if motion_frac[i] > 0.15:
             print(f"  [剔除] {raw_files[i].name}: 运动占比 {motion_frac[i]:.1%}，内容大幅移动")
-    min_need = 3 if use_deghost else 2
+    min_need = 4
     if len(usable) < min_need:
         raise ValueError(
             f'画面内容大幅移动（人物/动物等）：有效帧仅 {len(usable)} 张（需≥{min_need}），无法合成。\n'

@@ -37,6 +37,8 @@ MOTION_DIFF = 0.06
 MOTION_LIMIT = 0.15
 # 亚像素多样性：可用帧小数位移两两最大欧氏距离低于该值视为近零位移（仅降噪）
 SUBPIXEL_SPREAD = 0.1
+# 合成门槛：不足 4 张不合成（中位数锚定也更稳）
+MIN_COMPOSE_FRAMES = 4
 
 
 @dataclass
@@ -105,7 +107,7 @@ def _read_timestamp(path):
     return ts + _exif_subsecond(path, exifread), path
 
 
-def scan_photos(folder, gap=2.0, min_frames=3, progress_cb=None, cancel_cb=None):
+def scan_photos(folder, gap=2.0, min_frames=4, progress_cb=None, cancel_cb=None):
     """第一层·快筛：EXIF 拍摄时间分组（线程池并行，不解码像素）
 
     返回 (groups, singles_count)：groups = [(开始时间戳, [帧路径...]), ...] 按时间排序，
@@ -154,26 +156,14 @@ def scan_photos(folder, gap=2.0, min_frames=3, progress_cb=None, cancel_cb=None)
     return groups, singles
 
 
-def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, start_time=0.0):
-    """第二层·深判：一组连拍可否超分
+def _judge_sample(files, sample, start_time, max_shift, allow_extend):
+    """对给定帧子集做三指标判定；返回 Verdict。
 
-    时间均匀抽 sample_frames 帧（不整组解码，控耗时），半尺寸灰度解码后
-    以最锐帧为参考做相位相关；位移/运动/亚像素三指标按序短路。
+    allow_extend=True 且位移/运动剔除后可用帧不足门槛时返回 None——
+    说明抽样不足以定论，调用方应换全组帧重估（组内其余帧可能够用），
+    与合成管线"剔除超限帧继续合成"的行为保持一致。
     """
-    files = sorted(files)
-    n = len(files)
-    if n < 3:
-        return Verdict(files, start_time, "no", f"帧数不足（只有 {n} 张，需 ≥3）")
-
-    if done_registry:
-        hit = done_registry.get(group_fingerprint(files))
-        if hit and Path(hit.get("jpg", "")).exists():
-            return Verdict(files, start_time, "done", f"已合成过：{Path(hit['jpg']).name}")
-
-    # 抽样：时间均匀取 K 帧，解码半尺寸灰度并算清晰度（高频能量），最锐者为参考帧
-    k = min(sample_frames, n)
-    idxs = sorted(set(np.linspace(0, n - 1, k).round().astype(int).tolist()))
-    sample = [files[i] for i in idxs]
+    # 抽样子集里选最锐者为参考；半尺寸灰度解码 + 高频能量
     grays, scored = {}, []
     for p in sample:
         g = read_raw_as_gray(p, half_size=True)
@@ -183,7 +173,7 @@ def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, star
     ref = scored[0][1]
     ref_g = grays[ref]
 
-    # 指标一：位移范围（半尺寸相位相关 → 全尺寸 ×2）
+    # 指标一：位移范围（半尺寸相位相关 → 全尺寸 ×2），超限帧剔除
     shift_full = {ref: (0.0, 0.0)}
     for p in sample:
         if p == ref:
@@ -193,12 +183,15 @@ def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, star
     dists = {p: math.hypot(*shift_full[p]) for p in sample}
     max_dist = max(dists.values())
     usable = [p for p in sample if dists[p] <= max_shift]
-    if len(usable) < 3:
+    if len(usable) < MIN_COMPOSE_FRAMES:
+        if allow_extend:
+            return None
         return Verdict(files, start_time, "no",
-                       f"抖动过大：位移最大 {max_dist:.0f}px（上限 {max_shift:.0f}px），对不准",
+                       f"抖动过大：已剔除位移>{max_shift:.0f}px 的帧，可用仅 {len(usable)} 张"
+                       f"（需≥{MIN_COMPOSE_FRAMES}）",
                        metrics={"max_shift_px": max_dist})
 
-    # 指标二：内容运动（按位移 warp 回参考帧后比差异区占比）
+    # 指标二：内容运动（按位移 warp 回参考帧后比差异区占比），超限帧剔除
     h, w = ref_g.shape
     motion = {ref: 0.0}
     for p in usable:
@@ -212,10 +205,13 @@ def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, star
         diff = np.abs(aligned - ref_g)
         motion[p] = float(((diff > MOTION_DIFF) & valid).sum() / max(valid.sum(), 1))
     still = [p for p in usable if motion[p] <= MOTION_LIMIT]
-    if len(still) < 3:
+    if len(still) < MIN_COMPOSE_FRAMES:
+        if allow_extend:
+            return None
         worst = max(motion.values())
         return Verdict(files, start_time, "no",
-                       f"画面内容在动（差异区最大 {worst:.0%}），可用帧 {len(still)}/{len(usable)}",
+                       f"画面内容在动：剔除后可用仅 {len(still)} 张（需≥{MIN_COMPOSE_FRAMES}，"
+                       f"差异区最大 {worst:.0%}）",
                        metrics={"motion_frac": worst})
 
     # 指标三：亚像素多样性（小数位移两两最大欧氏距离）
@@ -230,14 +226,45 @@ def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, star
                        "三脚架近零位移：合成只降噪、不增加细节",
                        metrics={"subpixel_spread_px": spread})
 
-    suggested = min(16, n)
+    suggested = min(16, len(still))
+    dropped = len(sample) - len(still)
+    extra = f"，已剔除 {dropped} 帧" if dropped else ""
     return Verdict(files, start_time, "ok",
-                   f"建议用 {suggested} 帧（位移 {max_dist:.1f}px，亚像素分散 {spread:.2f}px）",
+                   f"建议用 {suggested} 帧{extra}（位移 {max_dist:.1f}px，亚像素分散 {spread:.2f}px）",
                    suggested_frames=suggested,
                    metrics={"max_shift_px": max_dist, "subpixel_spread_px": spread})
 
 
-def scan_and_judge(input_folder, output_dir=None, gap=2.0, min_frames=3,
+def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, start_time=0.0):
+    """第二层·深判：一组连拍可否超分
+
+    时间均匀抽 sample_frames 帧（不整组解码，控耗时）判定；位移/内容超限的帧
+    按剔除制处理（与合成管线一致）——若抽样剔除后可用帧不足门槛，自动换全组
+    帧重估一次再下结论，只有确实凑不齐 MIN_COMPOSE_FRAMES 张才判不可。
+    """
+    files = sorted(files)
+    n = len(files)
+    if n < MIN_COMPOSE_FRAMES:
+        return Verdict(files, start_time, "no",
+                       f"帧数不足（只有 {n} 张，需 ≥{MIN_COMPOSE_FRAMES}）")
+
+    if done_registry:
+        hit = done_registry.get(group_fingerprint(files))
+        if hit and Path(hit.get("jpg", "")).exists():
+            return Verdict(files, start_time, "done", f"已合成过：{Path(hit['jpg']).name}")
+
+    # 抽样：时间均匀取 K 帧
+    k = min(sample_frames, n)
+    idxs = sorted(set(np.linspace(0, n - 1, k).round().astype(int).tolist()))
+    sample = [files[i] for i in idxs]
+    v = _judge_sample(files, sample, start_time, max_shift, allow_extend=(len(sample) < n))
+    if v is None:
+        # 抽样不足以下结论：全组重估（约 0.5-1s/帧，仅疑难组走到这里）
+        v = _judge_sample(files, files, start_time, max_shift, allow_extend=False)
+    return v
+
+
+def scan_and_judge(input_folder, output_dir=None, gap=2.0, min_frames=4,
                    sample_frames=8, max_shift=50.0, progress_cb=None, cancel_cb=None):
     """入口：快筛 + 逐组深判。返回 (verdicts, singles_count)。
 

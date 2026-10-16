@@ -22,8 +22,8 @@ piexif = pytest.importorskip("piexif")
 
 from test_sr import _base_image, _warp  # noqa: E402
 from sr_suggest import (  # noqa: E402
-    dedup_raw_jpg, group_fingerprint, load_done_registry, record_done,
-    judge_group, scan_photos, scan_and_judge,
+    MIN_COMPOSE_FRAMES, dedup_raw_jpg, group_fingerprint, load_done_registry,
+    record_done, judge_group, scan_photos, scan_and_judge,
 )
 
 
@@ -132,7 +132,8 @@ class TestJudgeGroup:
         files = _make_burst(tmp_path, "ok", NORMAL_SHIFTS)
         v = judge_group(files)
         assert v.status == "ok"
-        assert v.suggested_frames == 6
+        # 剔除制：个别对齐残差大的帧可能被剔除（合成管线同样会滤），建议数 4-6
+        assert MIN_COMPOSE_FRAMES <= v.suggested_frames <= 6
 
     def test_identical_frames_denoise_only(self, tmp_path):
         files = _make_burst(tmp_path, "tri", [(0.0, 0.0)] * 5)
@@ -144,6 +145,31 @@ class TestJudgeGroup:
         v = judge_group(files)
         assert v.status == "no"
         assert "帧" in v.reason
+
+    def test_three_frames_insufficient(self, tmp_path):
+        """合成门槛 4 张起：3 帧组判帧数不足"""
+        files = _make_burst(tmp_path, "thr", NORMAL_SHIFTS[:3])
+        v = judge_group(files)
+        assert v.status == "no"
+        assert "帧" in v.reason
+
+    def test_shift_dropped_instead_of_reject(self, tmp_path):
+        """位移过大先剔除：抽样不足时全量重估，够 4 张好帧就判 ok 并报告剔除数"""
+        base = _base_image()
+        shifts = [(0.0, 0.0)] + [(0.3 + 0.1 * i, 0.5) for i in range(5)] + [(60.0, 0.0)] * 2
+        files = _make_burst(tmp_path, "mix", shifts)
+        v = judge_group(files, sample_frames=2, max_shift=50.0)
+        assert v.status == "ok"
+        assert v.suggested_frames == 6      # 8 帧剔除 2 张超限后剩 6
+        assert "剔" in v.reason
+
+    def test_shift_reject_after_full_recheck(self, tmp_path):
+        """全量重估后可用帧仍不足 4 才判不可"""
+        shifts = [(0.0, 0.0), (60.0, 0.0), (63.0, 3.0), (58.0, -4.0), (61.0, 5.0)]
+        files = _make_burst(tmp_path, "shk5", shifts)
+        v = judge_group(files, sample_frames=2, max_shift=50.0)
+        assert v.status == "no"
+        assert "位移" in v.reason
 
     def test_shift_too_large(self, tmp_path):
         shifts = [(0.0, 0.0), (9.0, 0.0), (10.0, 3.0), (11.0, -2.0), (12.0, 5.0)]

@@ -75,7 +75,7 @@ class App:
 
         f3 = ttk.Frame(self.root); f3.pack(fill='x', **pad)
         self.var_gap = tk.DoubleVar(value=2.0)
-        self.var_min = tk.IntVar(value=3)
+        self.var_min = tk.IntVar(value=4)
         self.var_topk = tk.IntVar(value=8)
         self.var_scale = tk.IntVar(value=2)
         self.var_sharpen = tk.DoubleVar(value=0.3)
