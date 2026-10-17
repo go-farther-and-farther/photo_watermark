@@ -289,7 +289,7 @@ def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48, wor
                 e = prev[ya:yb, xa:xb]
                 o = obs[ya:yb, xa:xb]
                 dist = cv2.GaussianBlur(e, (0, 0), sigma)
-                ratio = o / np.maximum(dist, eps)
+                ratio = np.minimum(o / np.maximum(dist, eps), 4.0)   # 上限防暗部噪声被逐轮放大
                 corr = cv2.GaussianBlur(ratio, (0, 0), sigma)
                 return y0, x0, np.clip(
                     e[y0-ya:y1-ya, x0-xa:x1-xa] * corr[y0-ya:y1-ya, x0-xa:x1-xa],
@@ -310,6 +310,30 @@ def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48, wor
     return (est * 65535.0 + 0.5).astype(np.uint16)
 
 
+def _chroma_denoise(rgb, shift=1):
+    """色度降噪：色差通道降采样+轻微模糊后还原。
+
+    多帧平均后残余噪点以色彩噪斑为主（亮度颗粒观感可接受）——色度带宽本来就低，
+    降采样处理几乎无成本、不伤亮度结构。
+    """
+    rgb = rgb.astype(np.float32)
+    y = rgb.mean(axis=2)
+    cb = rgb[:, :, 2] - y
+    cr = rgb[:, :, 0] - y
+    f = 2 ** shift
+    h, w = y.shape
+    hs, ws = max(h // f, 1), max(w // f, 1)
+    cb_s = cv2.GaussianBlur(cv2.resize(cb, (ws, hs), interpolation=cv2.INTER_AREA), (0, 0), 1.0)
+    cr_s = cv2.GaussianBlur(cv2.resize(cr, (ws, hs), interpolation=cv2.INTER_AREA), (0, 0), 1.0)
+    cb = cv2.resize(cb_s, (w, h), interpolation=cv2.INTER_LINEAR)
+    cr = cv2.resize(cr_s, (w, h), interpolation=cv2.INTER_LINEAR)
+    out = np.empty_like(rgb)
+    out[:, :, 0] = y + cr
+    out[:, :, 1] = y
+    out[:, :, 2] = y + cb
+    return np.clip(out, 0, 1)
+
+
 def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
     """融合后的 nocam 域线性数据 -> 线性sRGB（实测仿射）-> 2.2 幂 ->（可选）逐通道拉伸
 
@@ -318,6 +342,11 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
     stretch=False：LR 默认渲染口径（只 gamma 不拉伸）——DNG 内嵌预览用。
     Windows 图片看的是内嵌预览，拉伸版会和 LR 的 raw 渲染明显不一致（实测）。
     cam_to_srgb 为 derive_camera_to_srgb 返回的 (A, b)。
+
+    末尾两步修复（均为预览观感，不影响 DNG 数据）：
+    - 高光去色：通道裁剪差异会让过曝区偏紫/偏粉（LR 有高光修复所以正常），
+      按最大通道向中性白收敛，亮度保留、色度归零
+    - 色度降噪：压掉色彩噪斑
     """
     A, b = cam_to_srgb
     srgb = np.clip(linear_nocam.astype(np.float64) @ np.asarray(A, np.float64).T
@@ -329,6 +358,13 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
         luma = out[:, :, 0] * 0.2126 + out[:, :, 1] * 0.7152 + out[:, :, 2] * 0.0722
         lo, hi = np.percentile(luma, 0.5), np.percentile(luma, 99.5)
         out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
+    out = _chroma_denoise(out.astype(np.float32))
+    # 高光去色：0.88（伽马后）起向中性白平滑收敛
+    mx = out.max(axis=2)
+    k = np.clip((mx - 0.88) / (1.0 - 0.88), 0.0, 1.0)
+    k = k * k * (3.0 - 2.0 * k)
+    if k.any():
+        out = out * (1.0 - k[..., None]) + mx[..., None] * k[..., None]
     return (out * 255 + 0.5).astype(np.uint8)
 
 
