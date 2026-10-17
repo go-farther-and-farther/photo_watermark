@@ -21,6 +21,7 @@ import rawpy
 
 from align import align_all_frames, align_frame, find_best_ref_frame, read_raw_as_gray
 from super_res import enhance_sharpness, denoise
+import sr_moon
 
 
 def read_raw_full(raw_path, camera_space=False):
@@ -356,8 +357,29 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
         # 亮度单增益拉伸：从亮度百分位算统一 offset+gain，三通道共用。
         # 不能逐通道拉伸——各通道直方图不同，会掰歪色度（实测近距组白墙发绿）
         luma = out[:, :, 0] * 0.2126 + out[:, :, 1] * 0.7152 + out[:, :, 2] * 0.0722
-        lo, hi = np.percentile(luma, 0.5), np.percentile(luma, 99.5)
-        out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
+        med = float(np.median(luma))
+        hi = float(np.percentile(luma, 99.5))
+        if hi > 0 and med < 0.02 * hi:
+            # 黑主导画面（月亮/行星/星空/深空）：99% 像素是黑天空。全帧 0.5/99.5
+            # 定标会把白点落在天空上（P99.5 仍是天空），主体被拉顶成白饼
+            # ——2026-10-17 月亮实测 DNG 里盘面 0.49，JPG 里 80% 像素 ≥250。
+            # 正确做法：黑点保持 0（天空不许抬灰度），按"主体中位"曝光，
+            # 0.9 以上走软肩，既不过曝也不把天空拉灰。
+            subj = luma[luma > 0.25 * hi]
+            if subj.size > max(256, int(0.0005 * luma.size)):
+                m = float(np.median(subj))
+                out = np.clip(out * (0.62 / max(m, 1e-6)), 0, 1)
+                t = 0.90
+                over = out > t
+                if over.any():
+                    out[over] = t + (1.0 - t) * np.tanh((out[over] - t) / (1.0 - t))
+                print(f"  预览: 黑主导画面，按主体中位定标（中位 {m:.3f}→0.62，"
+                      f"天空不抬）")
+            else:
+                out = np.clip(out / max(hi, 1e-6), 0, 1)
+        else:
+            lo = float(np.percentile(luma, 0.5))
+            out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
     out = _chroma_denoise(out.astype(np.float32))
     # 高光去色：0.88（伽马后）起向中性白平滑收敛
     mx = out.max(axis=2)
@@ -443,9 +465,39 @@ def find_input_files(folder_path):
     return files
 
 
-def select_best_frames(raw_files, shifts, ref_idx, max_frames=16, max_shift=150.0):
-    """选择最佳帧"""
+# 单帧锐度门控（糊片剔除）：得分 < 组内最佳×RATIO 判为糊片。
+# 绝对比例而非中位数相对——过半糊片时中位数会被抬高，相对门限全体豁免。
+SHARP_GATE_RATIO = 0.35
+# 剔除后至少保留的帧数；候选不足此数或剔除后不足此数时不启用门控，
+# 保底交给重建期的运动/模糊 RMS 门限（中位数锚定至少 4 帧才稳，留余量）。
+SHARP_GATE_MIN_KEEP = 6
+
+
+def select_best_frames(raw_files, shifts, ref_idx, max_frames=16, max_shift=150.0,
+                       sharp=None, sharp_gate=True):
+    """选择最佳帧
+
+    sharp（各帧 sharpness_score 得分，与 raw_files 同序）给出且 sharp_gate=True
+    时，先做单帧锐度门控剔除糊片，再做位移过滤与亚像素均匀选帧。
+    """
     n = len(raw_files)
+
+    # 锐度门控（最先执行：糊帧的相位相关位移本来就不可信）
+    if sharp_gate and sharp is not None and n > SHARP_GATE_MIN_KEEP:
+        best = max(sharp)
+        limit = best * SHARP_GATE_RATIO
+        blurry = [i for i in range(n) if i != ref_idx and sharp[i] < limit]
+        if blurry and n - len(blurry) >= SHARP_GATE_MIN_KEEP:
+            for i in blurry:
+                print(f"  [剔除] {raw_files[i].name}: 锐度 {sharp[i]:.3f} < 门限 {limit:.3f}"
+                      f"（组内最佳 {best:.3f}×{SHARP_GATE_RATIO}），单帧糊片")
+            order = [i for i in range(n) if i not in set(blurry)]
+            raw_files = [raw_files[i] for i in order]
+            shifts = [shifts[i] for i in order]
+            sharp = [sharp[i] for i in order]
+            ref_idx = order.index(ref_idx)
+            n = len(raw_files)
+
     if n <= max_frames:
         return list(range(n)), raw_files, shifts, ref_idx
 
@@ -743,6 +795,195 @@ def _apply_field(off, SX, SY, tile_full=256):
     out = (o00 + (o01 - o00) * fx) * (1 - fy) + (o10 + (o11 - o10) * fx) * fy
     return (out[..., 0] * np.float32(2.0)).astype(np.float32), \
            (out[..., 1] * np.float32(2.0)).astype(np.float32)
+
+
+# 主体 ROI 路径参数：裁窗余量、最多解码帧数（ROI 很小，多解几帧不贵）
+SUBJECT_PAD = 1.35
+SUBJECT_MAX_DECODE = 40
+# 成品 JPG 的多尺度小波增益（从细到粗）与大尺度局部对比。
+# 见 sr_moon.wavelet_sharpen：RL 只反卷积光学 PSF，中频局部对比靠这一步。
+SUBJECT_WAVELET_GAINS = (0.6, 1.7, 1.4, 1.1)
+SUBJECT_LOCAL_CONTRAST = 0.10
+
+
+def process_subject_roi(raw_files, ref_idx, output_path, scale, use_dng, dng_meta,
+                        as_shot_neutral, et, pad=SUBJECT_PAD, max_frames=16,
+                        deconv_iters=24, sharpen_preview=True,
+                        wavelet_gains=SUBJECT_WAVELET_GAINS, local_contrast=SUBJECT_LOCAL_CONTRAST):
+    """暗背景亮小主体（月亮/行星/日面）的 ROI 堆栈
+
+    与通用管线的差别（为什么值得单开一条路）：
+      1. 裁窗到主体：输出 860x860 而非 11330x7446（99.6% 是黑的画布没有意义）
+      2. 配准只在主体上做：黑天空不参与相位相关/ECC/增益估计
+      3. 平移 + 旋转模型：三脚架重新取景带来的 0.1~0.5° 画面滚转必须吃掉
+         （0.3° 在 316px 月盘边缘就是 0.8px 错位）
+      4. lucky 选帧：糊帧不参与平均，否则整堆被拉糊
+      5. 按主体中位定标渲染：黑主导画面绝不能按全帧分位定白点（白饼根因）
+      6. 去卷积 σ 由盘缘 ESF 实测（不是拍脑袋 1.0px）
+
+    成功返回 True；检测/输入不满足时返回 False，由调用方回退通用管线。
+    """
+    files = [Path(p) for p in raw_files]
+    scale = float(scale)
+    t0 = time.time()
+    if not use_dng:
+        # 非 RAW / 缺 ExifTool：母版域不确定，交回通用管线（预览的黑主导修复已覆盖）
+        return False
+    print("\n[主体] 暗背景亮小目标 ROI 堆栈")
+
+    # [1] 半尺寸检测：主体心/半径 + 单帧锐度（用于超长组的预筛）
+    dets, sharp = [], []
+    for f in files:
+        g = read_raw_as_gray(f, half_size=True)
+        d = sr_moon.detect_bright_subject(g)
+        if d is None:
+            print(f"  [回退] {f.name} 未检测到亮小主体")
+            return False
+        dets.append(d)
+        sharp.append(float(cv2.Laplacian(g.astype(np.float64), cv2.CV_64F).var()))
+    cap = max(8, min(SUBJECT_MAX_DECODE, int(max_frames) * 3))
+    if len(files) > cap:
+        order = sorted(range(len(files)), key=lambda i: -sharp[i])[:cap]
+        keep = sorted(order)
+        files = [files[i] for i in keep]
+        dets = [dets[i] for i in keep]
+        print(f"  [预筛] 组内 {len(sharp)} 帧，按半尺寸锐度取前 {len(files)} 帧")
+    r_full = [d['r'] * 2.0 for d in dets]
+    W = 2 * int(np.ceil(max(r_full) * pad))
+    print(f"  主体直径 {2*max(r_full):.0f}px（占画面 {dets[0]['frac']*100:.2f}%），"
+          f"ROI {W}x{W}")
+
+    # [2] 全尺寸解码 + 逐帧以主体为中心裁窗
+    rois = []
+    for i, f in enumerate(files):
+        img = read_raw_camera_linear(f)
+        h, w = img.shape[:2]
+        cx, cy = dets[i]['cx'] * 2.0, dets[i]['cy'] * 2.0
+        x0, y0 = int(round(cx - W / 2.0)), int(round(cy - W / 2.0))
+        if x0 < 0 or y0 < 0 or x0 + W > w or y0 + W > h:
+            print(f"  [回退] {f.name} 主体太靠边，ROI 越界")
+            return False
+        roi = np.clip(img[y0:y0 + W, x0:x0 + W], 0.0, 1.0)
+        del img
+        rois.append((roi * 65535.0 + 0.5).astype(np.uint16))
+        gc.collect()
+    print(f"  [计时] 读帧 {time.time() - t0:.1f}s")
+
+    # [3] 逐帧盘缘宽度（锐度代理），选最锐的做参考
+    edges = []
+    for i, r in enumerate(rois):
+        g = r.astype(np.float32).mean(axis=2) / 65535.0
+        _sig, edge, _q = sr_moon.estimate_psf_sigma(g, W / 2.0, W / 2.0, r_full[i])
+        edges.append(edge)
+    print("  盘缘 10-90%: " + ' '.join(f'{edges[i]:.2f}px' for i in range(len(files))))
+    ref_i = int(np.argmin(edges))
+    print(f"  参考帧: {files[ref_i].name}（最锐 {edges[ref_i]:.2f}px）")
+
+    # [4] 配准（平移 + 受验收的旋转）
+    ref = rois[ref_i].astype(np.float32) / 65535.0
+    ref_g = ref.mean(axis=2)
+    yy, xx = np.mgrid[0:W, 0:W]
+    disk = ((xx - W / 2.0) ** 2 + (yy - W / 2.0) ** 2) <= (0.92 * r_full[ref_i]) ** 2
+    sky = ((xx - W / 2.0) ** 2 + (yy - W / 2.0) ** 2) > (1.25 * r_full[ref_i]) ** 2
+    M_list = []
+    for i in range(len(rois)):
+        if i == ref_i:
+            M_list.append(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            continue
+        g = rois[i].astype(np.float32).mean(axis=2) / 65535.0
+        M, rms, info = sr_moon.register_roi(ref_g, g, mask=disk)
+        M_list.append(M)
+        print(f"  {files[i].name}: 位移=({M[0,2]:+.3f},{M[1,2]:+.3f}) "
+              f"旋转={info['rot_deg']:+.3f}° 残差RMS={rms:.5f}"
+              f"{'' if info['rotated'] else '（旋转未采纳）'}")
+    print(f"  [计时] 配准 {time.time() - t0:.1f}s")
+
+    # [5] 主体内光度归一（增益取盘内中位，偏置取天空——整帧估计会被黑背景拉平）
+    ref_med = float(np.median(ref_g[disk]))
+    ref_sky = float(np.median(ref_g[sky]))
+    gains, biases = [], []
+    for i, r in enumerate(rois):
+        g = r.astype(np.float32).mean(axis=2) / 65535.0
+        gains.append(ref_med / max(float(np.median(g[disk])), 1e-9))
+        biases.append(float(np.median(g[sky])) - ref_sky * gains[-1])
+
+    # [6] lucky 选帧 + 融合
+    keep, wts = sr_moon.select_lucky(edges, min_keep=4, keep_ratio=1.25,
+                                     weight_power=4.0)
+    print(f"  选用 {len(keep)}/{len(rois)} 帧: " + ', '.join(
+        f'{files[i].stem}×{w:.2f}' for i, w in zip(keep, wts)))
+    fused = sr_moon.fuse_rois([rois[i] for i in keep], [M_list[i] for i in keep],
+                              scale, (0, 0),
+                              gains=[gains[i] for i in keep],
+                              biases=[biases[i] for i in keep],
+                              weights=wts)
+    del rois
+    gc.collect()
+    out_h, out_w = fused.shape[:2]
+    print(f"  融合 {out_w}x{out_h}（{time.time() - t0:.1f}s）")
+
+    # [7] PSF 实测 + 去卷积（σ 在融合图上按盘缘 ESF 量，SR 尺度）
+    cx_s, cy_s = out_w / 2.0, out_h / 2.0
+    r_s = r_full[ref_i] * scale
+    sig_s, edge_s, _q = sr_moon.estimate_psf_sigma(fused.mean(axis=2), cx_s, cy_s, r_s)
+    sigma_sr = float(np.clip(sig_s, 0.8 * scale, 3.0 * scale)) if np.isfinite(sig_s) else scale
+    print(f"  融合图盘缘 10-90%={edge_s:.2f}px = {edge_s/scale:.2f}px(原生)，"
+          f"去卷积 σ={sigma_sr:.2f}px/{deconv_iters} iter")
+
+    # [8] 输出：线性母版 + 成品预览
+    # 母版只到"融合 + 反卷积"；成品 JPG 再加一步行星摄影式多尺度小波锐化
+    # （中频局部对比度，是"看着锐"的另一半来源；RL 只处理光学 PSF 那一种模糊）。
+    fused_u16 = (np.clip(fused, 0, 1) * 65535.0 + 0.5).astype(np.uint16)
+    ref_frame = files[ref_i]
+    transform = derive_camera_to_srgb(ref_frame) or (np.eye(3), np.zeros(3))
+    A, b = transform
+
+    yy, xx = np.mgrid[0:out_h, 0:out_w]
+    rr = np.sqrt((xx - cx_s) ** 2 + (yy - cy_s) ** 2)
+    # 羽化月盘掩膜：从 0.89r 到 0.94r 渐隐，**盘缘本身不锐化**。
+    # 小波在"亮盘→黑天"的阶跃上必然产生内侧亮/外侧暗的振铃，把盘缘排除在
+    # 锐化区外是行星摄影的通行做法（手动擦边）。
+    wmask = np.clip((r_s * 0.94 - rr) / (r_s * 0.05), 0, 1).astype(np.float32)
+
+    def _render(linear_u16, enhance=False):
+        lin = np.clip(linear_u16.astype(np.float64) / 65535.0 @ np.asarray(A).T
+                      + np.asarray(b), 0, 1).astype(np.float32)
+        if enhance and wavelet_gains:
+            lin = np.clip(sr_moon.wavelet_sharpen(
+                lin, gains=wavelet_gains, local_contrast=local_contrast,
+                mask=wmask), 0, 1)
+        return sr_moon.subject_tonemap(lin, r_s * 0.95, center=(cx_s, cy_s))
+
+    preview_master = _render(fused_u16)
+    if sharpen_preview and deconv_iters > 0:
+        dec_u16 = rl_deconvolve_u16(fused_u16, iterations=deconv_iters, sigma=sigma_sr)
+        final = _render(dec_u16, enhance=True)
+    else:
+        final = preview_master
+
+    base = str(output_path).rsplit('.', 1)[0]
+    jpg_path = f"{base}_{scale:g}x.jpg"
+    ok_j, buf = cv2.imencode('.jpg', cv2.cvtColor((final * 255 + 0.5).astype(np.uint8),
+                                                  cv2.COLOR_RGB2BGR),
+                             [cv2.IMWRITE_JPEG_QUALITY, 95])
+    Path(jpg_path).write_bytes(buf.tobytes())
+    if use_dng and et and dng_meta and as_shot_neutral is not None:
+        dng_path = f"{base}_{scale:g}x.dng"
+        if not write_linear_dng(dng_path, fused_u16, dng_meta['matrix'], as_shot_neutral,
+                                dng_meta['model'], et,
+                                preview_rgb=(preview_master * 255 + 0.5).astype(np.uint8),
+                                orig_raw_name=ref_frame.name):
+            raise RuntimeError(f"DNG 写入失败: {dng_path}")
+        copy_exif_from_frame(et, ref_frame, dng_path, width=out_w, height=out_h)
+        print(f"  DNG:  {dng_path} ({Path(dng_path).stat().st_size/1e6:.1f}MB, "
+              f"Linear DNG，主体 ROI {out_w}x{out_h})")
+    copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h)
+    print(f"  JPG:  {jpg_path} ({Path(jpg_path).stat().st_size/1e6:.2f}MB)")
+    print(f"\n{'=' * 60}")
+    print(f"完成！ {len(keep)} 帧主体堆栈（x{scale:g}，{out_w}x{out_h}）")
+    print(f"耗时: {time.time() - t0:.1f} 秒")
+    print(f"{'=' * 60}")
+    return True
 
 
 def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False,
@@ -1230,9 +1471,22 @@ def run_k14_engine(backend_exe, frame_paths, ref_path, out_dir, out_prefix='k14'
 
 def load_subifd_rgb(dng_path):
     """读 Adobe 结构 DNG 的 SubIFD（LinearRaw）为 RGB u16（tifffile 官方通道，
-    兼容无损 JPEG 压缩的 SubIFD——手写瓦片解析器不支持压缩）"""
+    兼容无损 JPEG 压缩的 SubIFD——手写瓦片解析器不支持压缩）
+
+    LinearRaw 是最大的一块 uint16 序列；小图（<1000px，如月亮 ROI 母版）时
+    预览与 raw 同尺寸，不能再用"行数>1000"判别，改为按像素数取最大。
+    """
     import tifffile
     tf = tifffile.TiffFile(str(dng_path))
+    best, best_n = None, -1
+    for s in tf.series:
+        if s.dtype != np.uint16 or len(s.shape) < 2:
+            continue
+        n = int(np.prod(s.shape))
+        if n > best_n:
+            best, best_n = s, n
+    if best is not None:
+        return best.asarray()
     for s in tf.series:
         if s.shape[0] > 1000 and s.dtype == np.uint16:   # 主 raw 序列
             return s.asarray()
@@ -1242,9 +1496,10 @@ def load_subifd_rgb(dng_path):
 def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=0.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
-            rl_sharpen=True, blur_gate=True, k14_backend=None,
+            rl_sharpen=True, blur_gate=True, sharp_gate=True, k14_backend=None,
             use_homography=True, use_noise_weight=True, use_local_align=True,
-            files=None):
+            files=None, use_subject_roi=True, subject_deconv_iters=24,
+            subject_enhance=True):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
@@ -1280,7 +1535,8 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
     print("\n[1/4] 找最佳参考帧并对齐...")
     _t1 = time.time()
     ref_idx = find_best_ref_frame(raw_files, half_size=True)
-    shifts = align_all_frames(raw_files, ref_idx, half_size=True)
+    shifts, sharp_scores = align_all_frames(raw_files, ref_idx, half_size=True)
+    ref_score = sharp_scores[ref_idx] if sharp_scores else None
     print(f"  [计时] 预对齐 {time.time() - _t1:.1f}s")
 
     # 打印位移统计
@@ -1301,8 +1557,16 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
     print(f"\n[2/4] 选择最佳 {max_frames} 帧...")
     all_frames = list(raw_files)          # K14 等外挂引擎可能需要从全组补帧
     selected_indices, raw_files, shifts, ref_idx = select_best_frames(
-        raw_files, shifts, ref_idx, max_frames, max_shift
+        raw_files, shifts, ref_idx, max_frames, max_shift,
+        sharp=sharp_scores, sharp_gate=sharp_gate,
     )
+    # 门控豁免参考帧，但重建不能锚在糊帧上（糊参考让所有帧的残差失真）：
+    # 参考帧得分低于门限时，在保留帧里重选参考并重新预对齐。
+    if (sharp_gate and sharp_scores is not None and ref_score is not None
+            and ref_score < SHARP_GATE_RATIO * max(sharp_scores)):
+        print(f"  [锐度门控] 参考帧锐度 {ref_score:.3f} 低于门限，保留帧中重选参考帧")
+        ref_idx = find_best_ref_frame(raw_files, half_size=True)
+        shifts, sharp_scores = align_all_frames(raw_files, ref_idx, half_size=True)
     print(f"  使用 {len(raw_files)} 帧, 参考帧: {ref_idx}")
 
     # DNG 可用性判定（需在重建前定：决定解码色彩域）
@@ -1326,6 +1590,34 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
                     with _rp.imread(str(raw_files[ref_idx])) as _raw:
                         as_shot_neutral = neutral_from_cam_mul(_raw.camera_whitebalance)
                 use_dng = as_shot_neutral is not None
+    # ===== 小主体 ROI 路径（月亮/行星：暗背景上的亮小目标）=====
+    # 通用链路是为"整帧都有内容"的手持风景连拍设计的：对齐/光度/去鬼影/预览
+    # 拉伸全部按整帧统计。月亮这类画面 99% 是黑天空、主体只有几百像素时，
+    # 这些统计全部失真（预览被拉成白饼、输出是 99.6% 黑的巨幅画布）。
+    # 检测到该形态就切 ROI 路径：以主体为中心裁窗、平移+旋转亚像素配准、
+    # 主体内光度归一、细网格融合、按主体中位定标渲染。
+    if use_subject_roi and not use_legacy and not k14_backend:
+        try:
+            _g = read_raw_as_gray(all_frames[ref_idx], half_size=True)
+            _subj = sr_moon.detect_bright_subject(_g)
+        except Exception:
+            _subj = None
+        if _subj is not None:
+            print(f"\n[检测] 暗背景亮小主体：直径 {_subj['r']*4:.0f}px "
+                  f"（占画面 {_subj['frac']*100:.2f}%，对比度 {_subj['contrast']:.0f}x）"
+                  f" → 走主体 ROI 堆栈路径")
+            if process_subject_roi(all_frames, ref_idx, output_path, scale,
+                                   use_dng, dng_meta, as_shot_neutral, et,
+                                   pad=SUBJECT_PAD, max_frames=max_frames,
+                                   deconv_iters=subject_deconv_iters,
+                                   sharpen_preview=rl_sharpen,
+                                   wavelet_gains=(SUBJECT_WAVELET_GAINS
+                                                  if subject_enhance else ()),
+                                   local_contrast=(SUBJECT_LOCAL_CONTRAST
+                                                   if subject_enhance else 0.0)):
+                return
+            print("  [回退] 主体 ROI 路径未完成，改用通用管线")
+
     if k14_backend and use_dng and scale == 2 and len(all_frames) < K14_MAX_FRAMES:
         # Fast K14 后端硬性要求恰好 14 帧：小组直接回退内置管线
         print(f"  [K14] 组内仅 {len(all_frames)} 帧（引擎要求恰好 {K14_MAX_FRAMES} 帧），改用内置管线")
@@ -1590,7 +1882,7 @@ def main():
     parser.add_argument("--scale", "-s", type=int, default=2, help="倍率")
     parser.add_argument("--max-frames", "-n", type=int, default=16, help="最大使用帧数")
     parser.add_argument("--max-shift", type=float, default=0.0,
-                        help="最大允许位移(像素)，0=自动（画面最大边 8%，保底 150）")
+                        help="最大允许位移(像素)，0=自动（画面最大边 8%%，保底 150）")
     parser.add_argument("--no-deghost", action="store_true", help="禁用去鬼影")
     parser.add_argument("--sharpen", type=float, default=0.3, help="锐化强度")
     parser.add_argument("--denoise", action="store_true", help="启用降噪")
@@ -1598,21 +1890,32 @@ def main():
     parser.add_argument("--tile", type=int, default=1024, help="融合分块大小（像素）")
     parser.add_argument("--no-rl-sharpen", action="store_true", help="关闭 JPG 的 RL 反卷积锐化")
     parser.add_argument("--no-blur-gate", action="store_true", help="关闭模糊 RMS 选帧门限")
+    parser.add_argument("--no-sharp-gate", action="store_true", help="关闭单帧锐度门控（糊片剔除）")
     parser.add_argument("--no-homography", action="store_true", help="关闭单应精修（退回欧氏对齐）")
     parser.add_argument("--no-noise-weight", action="store_true", help="关闭噪声感知融合加权")
     parser.add_argument("--no-local-align", action="store_true", help="关闭局部对齐（视差校正）")
     parser.add_argument("--k14-backend", default=None,
                         help="Jiangtherapee Fast K14 后端 exe 路径（外挂引擎，2x 专用）")
+    parser.add_argument("--no-subject-roi", action="store_true",
+                        help="关闭暗背景亮小主体（月亮/行星）ROI 堆栈路径")
+    parser.add_argument("--subject-deconv-iters", type=int, default=24,
+                        help="主体 ROI 路径的 RL 去卷积迭代数（默认 24）")
+    parser.add_argument("--no-subject-enhance", action="store_true",
+                        help="关闭主体成品的小波锐化/局部对比（只留去卷积）")
 
     args = parser.parse_args()
     process(
         args.input, args.output, args.scale, args.max_frames, args.max_shift,
         not args.no_deghost, args.sharpen, args.denoise, 5, args.legacy, args.tile,
         rl_sharpen=not args.no_rl_sharpen, blur_gate=not args.no_blur_gate,
+        sharp_gate=not args.no_sharp_gate,
         k14_backend=args.k14_backend,
         use_homography=not args.no_homography,
         use_noise_weight=not args.no_noise_weight,
-        use_local_align=not args.no_local_align
+        use_local_align=not args.no_local_align,
+        use_subject_roi=not args.no_subject_roi,
+        subject_deconv_iters=args.subject_deconv_iters,
+        subject_enhance=not args.no_subject_enhance,
     )
 
 

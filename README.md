@@ -110,17 +110,22 @@ python photo_watermark.py input.jpg -o output.jpg
 
 ### 直接下载exe
 
-下载 `photo_watermark.exe`，无需安装Python环境。
+下载 **`photo_watermark_v2.1.0.exe`**（约 93MB），无需安装 Python 环境。文件名带版本号，
+方便区分和分享；程序内部版本与文件名一致。
 
-两个版本可选（功能完全一致，仅是否内置 ExifTool 不同）：
-- **`photo_watermark.exe`（完整版，约 36MB）**：内置整个 ExifTool，在任何电脑上零依赖，对任何品牌/格式（NEF、ARW、CR3 等）都能可靠读取快门数
-- **`photo_watermark_lite.exe`（精简版，约 23MB）**：不内置 ExifTool。本机已装 ExifTool 时会自动调用，表现与完整版完全一致；未安装时回退 exifread 解析——Nikon 等常见机身可读快门数，冷门品牌可能读不到
+**单一全量版**：内置整个 ExifTool，在任何电脑上零依赖，对任何品牌/格式（NEF、ARW、CR3 等）
+都能可靠读取快门数，并含完整超分（含月亮/行星 ROI 堆栈）与调色模板。
 
-**怎么选？**
-- 只自己用、拍的是 Nikon 机身 → 精简版够用（省约 14MB）
-- 要发给别人 / 在未装 ExifTool 的电脑上用 / Sony、Canon、Fuji 等其他品牌 → 完整版，一个 exe 开箱即用
+**v2.1 更新**
+- **新增调色模板**：线性光 8 参数（曝光/对比/高光/阴影/饱和度/色温/色调/黑点），
+  模板随 `水印设置.ini` 分发、可自定义，强度 0–100% 连续可调；只作用于照片本体，
+  水印与 Logo 不受影响
+- **新增月亮/行星 ROI 堆栈**：自动识别"暗背景亮小主体"，裁到主体做亚像素配准
+  （平移+旋转）、lucky 选帧、细网格融合、按实测 PSF 去卷积与多尺度小波锐化；
+  输出裁到主体的 Linear DNG 母版，不再产出 99.6% 是黑的巨幅画布
+- **修复**：黑主导画面（月亮/星空/深空）预览被全帧分位拉伸成白饼
 
-> 许可说明：完整版内嵌的 [ExifTool](https://exiftool.org/)（Phil Harvey 著）采用 **Artistic License 1.0 / GPL 双许可**，允许随软件再分发，因此内置打包合法。精简版不含 ExifTool；其 exifread 为 MIT 许可的 Python 库。
+> 许可说明：内嵌的 [ExifTool](https://exiftool.org/)（Phil Harvey 著）采用 **Artistic License 1.0 / GPL 双许可**，允许随软件再分发，因此内置打包合法。
 
 ### 源码安装
 

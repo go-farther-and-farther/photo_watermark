@@ -273,3 +273,103 @@ class TestApplyField:
         SX = np.array([[512.0]])   # tile_full=256 -> gx = 512/256-0.5 = 1.5（列1、2正中）
         dx, _ = sr_process._apply_field(off, SX, np.array([[100.0]]), tile_full=256)
         assert np.allclose(dx, 6.0), dx
+
+
+# ======================================================================
+# 单帧锐度门控（设计：docs/super_res/单帧锐度门控-设计-2026-10-17.md）
+# ======================================================================
+
+from align import sharpness_score  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+
+class TestSharpnessScore:
+    """拉普拉斯方差锐度（半尺寸灰度上计算，抗噪靠解码端 2x2 像素合并）"""
+
+    def test_blur_monotonic(self):
+        tex = _texture(256)
+        s_raw = sharpness_score(tex)
+        s_b2 = sharpness_score(cv2.GaussianBlur(tex, (0, 0), 2.0))
+        s_b5 = sharpness_score(cv2.GaussianBlur(tex, (0, 0), 5.0))
+        assert s_raw > s_b2 > s_b5 > 0
+        # 最重模糊掉进门限（0.35×最佳）以下——门控能识别
+        assert s_b5 < s_raw * 0.35
+
+    def test_noise_robust(self):
+        # 适度噪声不该翻转锐/糊排序（抗噪靠解码端像素合并，
+        # 见 sharpness_score docstring 的实测数据）
+        rng = np.random.default_rng(3)
+        tex = _texture(256)
+        noise = rng.normal(0, 0.02, tex.shape).astype(np.float32)
+        s_sharp_noisy = sharpness_score(tex + noise)
+        s_blur_noisy = sharpness_score(cv2.GaussianBlur(tex, (0, 0), 3.0) + noise)
+        assert s_sharp_noisy > s_blur_noisy
+
+    def test_flat_image_near_zero(self):
+        assert sharpness_score(np.full((128, 128), 0.5, np.float32)) < 1.0
+
+
+class TestSelectBestFramesSharpGate:
+    """选帧阶段糊片剔除：相对组内最佳的比例门限 + 参考帧豁免 + 帧数保底"""
+
+    @staticmethod
+    def _make(n, sharp_vals, ref_idx=0):
+        files = [Path(f"DSC_{i:04d}.NEF") for i in range(n)]
+        shifts = [(0.3 * i, -0.2 * i) for i in range(n)]   # 全部小位移
+        return files, shifts, ref_idx, list(sharp_vals)
+
+    def test_blurry_dropped(self):
+        files, shifts, ref, sharp = self._make(
+            10, [9000, 8000, 9000, 8500, 300, 400, 350, 9000, 8800, 8600])
+        idx, fs, ss, ri = sr_process.select_best_frames(
+            files, shifts, ref, max_frames=16, sharp=sharp)
+        names = {f.name for f in fs}
+        assert len(fs) == 7                      # 3 张糊片被剔
+        assert not names & {"DSC_0004.NEF", "DSC_0005.NEF", "DSC_0006.NEF"}
+        assert fs[ri].name == "DSC_0000.NEF"     # 参考帧重映射正确
+        assert len(ss) == len(fs) == len(idx)
+
+    def test_ref_exempt_even_if_blurry(self):
+        files, shifts, ref, sharp = self._make(
+            10, [100, 9000, 8000, 9000, 8500, 300, 400, 350, 8800, 8600])
+        idx, fs, ss, ri = sr_process.select_best_frames(
+            files, shifts, ref, max_frames=16, sharp=sharp)
+        assert fs[ri].name == "DSC_0000.NEF"     # 参考帧糊也保留（下游加权兜底）
+        assert "DSC_0005.NEF" not in {f.name for f in fs}
+
+    def test_floor_no_drop(self):
+        # 剔除后只剩 3 帧 < 保底 6：整组不启用门控
+        files, shifts, ref, sharp = self._make(
+            8, [9000, 100, 200, 150, 100, 200, 150, 9000])
+        idx, fs, ss, ri = sr_process.select_best_frames(
+            files, shifts, ref, max_frames=16, sharp=sharp)
+        assert len(fs) == 8
+
+    def test_small_group_untouched(self):
+        files, shifts, ref, sharp = self._make(6, [9000, 100, 100, 100, 100, 100])
+        idx, fs, ss, ri = sr_process.select_best_frames(
+            files, shifts, ref, max_frames=16, sharp=sharp)
+        assert len(fs) == 6                      # 候选 ≤ 保底帧数，不启用
+
+    def test_gate_off_and_none(self):
+        files, shifts, ref, sharp = self._make(
+            10, [9000, 8000, 9000, 8500, 300, 400, 350, 9000, 8800, 8600])
+        for kw in ({"sharp": sharp, "sharp_gate": False}, {"sharp": None}):
+            idx, fs, ss, ri = sr_process.select_best_frames(
+                files, shifts, ref, max_frames=16, **kw)
+            assert len(fs) == 10
+
+    def test_combined_with_displacement_filter(self):
+        # 大组（>max_frames）：锐度门控 + 位移过滤叠加，参考帧始终保留
+        files, shifts, ref, sharp = self._make(
+            20, [9000] * 20)
+        for i in (3, 7, 11):                     # 3 张糊片
+            sharp[i] = 200
+        for i in (5, 15):                        # 2 张大位移
+            shifts[i] = (400.0, 0.0)
+        idx, fs, ss, ri = sr_process.select_best_frames(
+            files, shifts, ref, max_frames=12, max_shift=150.0, sharp=sharp)
+        names = [f.name for f in fs]
+        assert len(fs) == 12                     # 20 - 3(糊) - 2(位移) = 15 > 12，取 12
+        assert "DSC_0000.NEF" in names and fs[ri].name == "DSC_0000.NEF"
+        assert not {"DSC_0003.NEF", "DSC_0007.NEF", "DSC_0011.NEF"} & set(names)

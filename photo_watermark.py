@@ -43,6 +43,9 @@ from compressor import (
     write_atomic, sanitize_subfolder, save_metadata_sidecar,
 )
 
+# 照片调色模板（线性光 8 参数，见 color_grade.py）
+import color_grade
+
 
 # 控制台输出容错：避免中文环境下重定向输出时因编码崩溃（如 © 等字符）
 if hasattr(sys.stdout, 'reconfigure'):
@@ -54,7 +57,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v2.0.0'
+VERSION = 'v2.1.0'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -300,6 +303,11 @@ SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', S
 LANDSCAPE_STYLE = get_config_value('智能样式', '横版样式', LANDSCAPE_STYLE if 'LANDSCAPE_STYLE' in dir() else 'strip')
 PORTRAIT_STYLE = get_config_value('智能样式', '竖版样式', PORTRAIT_STYLE if 'PORTRAIT_STYLE' in dir() else 'blur')
 SQUARE_STYLE = get_config_value('智能样式', '方形样式', SQUARE_STYLE if 'SQUARE_STYLE' in dir() else 'transparent')
+
+# 调色模板（作用于照片本体；「原图」=关闭，强度 0-100）
+GRADE_TEMPLATE = get_config_value('基础设置', '调色模板', '原图')
+GRADE_STRENGTH = get_config_value('基础设置', '调色强度', 100, 'int')
+GRADE_TEMPLATES = color_grade.load_templates(_ini_config)
 
 # 确保必要变量存在
 if 'DEFAULT_LOGO' not in dir():
@@ -1691,6 +1699,25 @@ def unique_output_path(path) -> Path:
         n += 1
 
 
+def _apply_grade(image):
+    """按当前全局设置（GRADE_TEMPLATE / GRADE_STRENGTH）给照片本体调色
+
+    「原图」或强度 0 时原样返回。调用点都在画边框/水印之前，所以边框颜色、
+    水印、Logo 不会被调色污染。失败时回退原图（不让调色阻断出图）。
+    """
+    name = GRADE_TEMPLATE or color_grade.OFF_TEMPLATE
+    if name == color_grade.OFF_TEMPLATE or GRADE_STRENGTH <= 0:
+        return image
+    params = GRADE_TEMPLATES.get(name)
+    if not params:
+        return image
+    try:
+        return color_grade.apply_grade(image, params, GRADE_STRENGTH / 100.0)
+    except Exception as e:
+        print(f"  [警告] 调色失败（{name}），按原图输出: {e}")
+        return image
+
+
 def process_single_image(
     input_path: str,
     output_path: str,
@@ -1789,6 +1816,9 @@ def process_single_image(
 
         # 从kwargs中移除logo_path，避免重复传递
         kwargs_clean = {k: v for k, v in kwargs.items() if k != 'logo_path'}
+
+        # 调色模板：只作用于照片本体（边框/水印/Logo 在之后画，不受影响）
+        image = _apply_grade(image)
 
         # 为每个样式分别生成文件
         output_dir = Path(output_path).parent
@@ -2068,7 +2098,8 @@ def refresh_globals_from_ini():
         BORDER_FRAME_COLOR, BORDER_TEXT_COLOR, DEFAULT_BRAND, SMART_STYLE, LOGO_HEIGHT_RATIO, \
         ART_FONT_PATH, ART_FONT_RATIO, ART_PARAMS_RATIO, ART_TEXT_COLOR, ART_TEXT_SHADOW, \
         WORDMARK_RATIO, WORDMARK_TEXT_COLOR, WORDMARK_TEXT_SHADOW, \
-        BORDER_HEIGHT_RATIO, COMPRESS_MAX_EDGE, COMPRESS_TARGET_MB, COMPRESS_SUBFOLDER
+        BORDER_HEIGHT_RATIO, COMPRESS_MAX_EDGE, COMPRESS_TARGET_MB, COMPRESS_SUBFOLDER, \
+        GRADE_TEMPLATE, GRADE_STRENGTH, GRADE_TEMPLATES
     _ini_config = load_ini_config()
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
@@ -2098,6 +2129,9 @@ def refresh_globals_from_ini():
     COMPRESS_MAX_EDGE = get_config_value('压缩设置', '最大边长', COMPRESS_MAX_EDGE, 'int')
     COMPRESS_TARGET_MB = get_config_value('压缩设置', '目标体积MB', COMPRESS_TARGET_MB, 'float')
     COMPRESS_SUBFOLDER = get_config_value('压缩设置', '压缩输出子文件夹', COMPRESS_SUBFOLDER)
+    GRADE_TEMPLATE = get_config_value('基础设置', '调色模板', GRADE_TEMPLATE)
+    GRADE_STRENGTH = get_config_value('基础设置', '调色强度', GRADE_STRENGTH, 'int')
+    GRADE_TEMPLATES = color_grade.load_templates(_ini_config)
     _art_font_cache.clear()  # 字体可能变了，清缓存
 
 
@@ -2112,6 +2146,7 @@ PREVIEW_OVERRIDABLE = (
     'ART_FONT_PATH', 'ART_FONT_RATIO', 'ART_PARAMS_RATIO',
     'ART_TEXT_COLOR', 'ART_TEXT_SHADOW',
     'WORDMARK_RATIO', 'WORDMARK_TEXT_COLOR', 'WORDMARK_TEXT_SHADOW',
+    'GRADE_TEMPLATE', 'GRADE_STRENGTH',
 )
 
 # 预览渲染互斥锁：防止后台线程并发改全局配置导致渲染错乱
@@ -2196,20 +2231,23 @@ def render_preview(
             if not logo_path and exif_data.get('brand'):
                 logo_path = get_logo_by_brand(exif_data['brand'])
 
-            # 5. 渲染指定样式（预览按所选样式原样渲染，不做智能样式替换，
+            # 5. 调色模板（照片本体；预览与导出一致）
+            image = _apply_grade(image)
+
+            # 6. 渲染指定样式（预览按所选样式原样渲染，不做智能样式替换，
             #    让用户能直观对比各样式的差异）
             if not styles:
                 return None
             result = apply_single_style(image, styles[0], exif_data, custom_text, logo_path)
 
-            # 6. 缩小到预览尺寸
+            # 7. 缩小到预览尺寸
             result.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
             return result
         except Exception as e:
             print(f"  [预览] 渲染失败: {e}")
             return None
         finally:
-            # 7. 恢复被覆盖的配置
+            # 8. 恢复被覆盖的配置
             if saved:
                 for k, v in saved.items():
                     globals()[k] = v
@@ -2341,6 +2379,23 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     v_target_mb = tk.StringVar(value='%g' % COMPRESS_TARGET_MB)
     v_subfolder = tk.StringVar(value=COMPRESS_SUBFOLDER)
 
+    # 调色模板（照片本体）：模板 + 强度 + 编辑用滑杆
+    _grade_off = color_grade.OFF_TEMPLATE
+    v_grade = tk.StringVar(value=GRADE_TEMPLATE if GRADE_TEMPLATE in GRADE_TEMPLATES
+                           else _grade_off)
+    v_grade_strength = tk.IntVar(value=max(0, min(100, int(GRADE_STRENGTH))))
+    v_grade_preview = tk.StringVar(value=v_grade.get())   # 预览用（编辑时指向临时模板）
+    v_grade_name = tk.StringVar(value='我的模板')
+    v_g_expo = tk.IntVar(value=0)
+    v_g_cont = tk.IntVar(value=100)
+    v_g_hi = tk.IntVar(value=0)
+    v_g_sh = tk.IntVar(value=0)
+    v_g_sat = tk.IntVar(value=100)
+    v_g_temp = tk.IntVar(value=0)
+    v_g_tint = tk.IntVar(value=0)
+    v_g_black = tk.IntVar(value=0)
+    v_g_auto = tk.BooleanVar(value=True)
+
     def _parse_max_edge(s: str) -> int:
         """「最大边长」显示值 -> 像素数：档位名查表，数字直读，非法回退 0（保持原尺寸）"""
         s = (s or '').strip()
@@ -2390,6 +2445,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             'WORDMARK_RATIO': v_wm_ratio.get() / 1000.0,
             'WORDMARK_TEXT_COLOR': parse_color(v_wm_color.get()),
             'WORDMARK_TEXT_SHADOW': v_wm_shadow.get(),
+            'GRADE_TEMPLATE': v_grade_preview.get(),
+            'GRADE_STRENGTH': v_grade_strength.get(),
         }
 
     def refresh_preview():
@@ -2614,6 +2671,8 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
             ('官方字标', '字标大小', fmt_float(v_wm_ratio.get() / 1000)),
             ('官方字标', '文字颜色', v_wm_color.get()),
             ('官方字标', '文字阴影', '是' if v_wm_shadow.get() else '否'),
+            ('基础设置', '调色模板', v_grade.get()),
+            ('基础设置', '调色强度', str(v_grade_strength.get())),
         ]
         failures = []
         for sec, key, val in save_items:
@@ -2839,6 +2898,147 @@ def open_settings_window(parent=None, preview_photo='', preview_styles='', previ
     cb_wm_shadow.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
 
     # ===== 右侧：实时预览（2 列网格，全部样式同步更新） =====
+    # ---------------- 调色 ----------------
+    tab_c = ttk.Frame(nb, padding=12)
+    nb.add(tab_c, text="  调色  ")
+    ttk.Label(tab_c, text="照片本体的简单调色；边框/水印/Logo 不受影响。"
+                          "选模板即用，调完滑杆可另存为自己的模板。",
+              foreground='#666666').pack(anchor='w', pady=(0, 8))
+
+    _EDIT = '__编辑中__'
+
+    def _grade_edit_vars():
+        return dict(
+            exposure=v_g_expo.get() / 100.0,
+            contrast=v_g_cont.get() / 100.0,
+            highlights=v_g_hi.get() / 100.0,
+            shadows=v_g_sh.get() / 1000.0,
+            saturation=v_g_sat.get() / 100.0,
+            temp=v_g_temp.get() / 100.0,
+            tint=v_g_tint.get() / 100.0,
+            black=v_g_black.get() / 1000.0,
+            black_auto=bool(v_g_auto.get()),
+        )
+
+    def _load_grade_ui(name):
+        p = GRADE_TEMPLATES.get(name)
+        if p is None:
+            if name != color_grade.OFF_TEMPLATE:
+                return
+            p = dict(color_grade.IDENTITY, black_auto=False)
+        v_g_expo.set(int(round(p['exposure'] * 100)))
+        v_g_cont.set(int(round(p['contrast'] * 100)))
+        v_g_hi.set(int(round(p['highlights'] * 100)))
+        v_g_sh.set(int(round(p['shadows'] * 1000)))
+        v_g_sat.set(int(round(p['saturation'] * 100)))
+        v_g_temp.set(int(round(p['temp'] * 100)))
+        v_g_tint.set(int(round(p['tint'] * 100)))
+        v_g_black.set(int(round(p['black'] * 1000)))
+        v_g_auto.set(bool(p.get('black_auto')))
+        v_grade_name.set(name)
+
+    def _on_grade_pick(*_a):
+        _load_grade_ui(v_grade.get())
+        v_grade_preview.set(v_grade.get())
+        refresh_preview()
+
+    def _on_grade_edit(*_a):
+        GRADE_TEMPLATES[_EDIT] = _grade_edit_vars()
+        v_grade_preview.set(_EDIT)
+        refresh_preview()
+
+    for _v in (v_g_expo, v_g_cont, v_g_hi, v_g_sh, v_g_sat, v_g_temp, v_g_tint,
+               v_g_black, v_g_auto):
+        _v.trace_add('write', _on_grade_edit)
+    v_grade.trace_add('write', _on_grade_pick)
+    v_grade_strength.trace_add('write', lambda *a: refresh_preview())
+
+    c_wrap = ttk.Frame(tab_c)
+    c_wrap.pack(fill='x')
+    c1 = ttk.LabelFrame(c_wrap, text="模板", padding=10)
+    c1.grid(row=0, column=0, sticky='nsew', padx=(0, 6))
+    c1.columnconfigure(1, weight=1)
+    ttk.Label(c1, text="使用模板:").grid(row=0, column=0, sticky='w', pady=4)
+    cb_grade = ttk.Combobox(c1, textvariable=v_grade, state='readonly', width=14,
+                            values=color_grade.template_names(GRADE_TEMPLATES))
+    cb_grade.grid(row=0, column=1, sticky='ew', pady=4)
+    ToolTip(cb_grade, "「原图」= 不调色。其余模板只作用于照片本体，\n"
+                      "边框颜色、水印、Logo 不受影响。")
+    add_scale(c1, 1, "强度:", v_grade_strength, 0, 100, "%d", 1,
+              tip="0 = 不调色，100 = 模板原强度，50 = 一半效果。")
+    ttk.Label(c1, text="另存为:").grid(row=2, column=0, sticky='w', pady=(10, 4))
+    e_gname = ttk.Entry(c1, textvariable=v_grade_name, width=14)
+    e_gname.grid(row=2, column=1, sticky='ew', pady=(10, 4))
+    ToolTip(e_gname, "把右边滑杆的当前参数存成一个新模板（写进 用户设置.ini）。\n"
+                     "同名模板会被覆盖；「原图」是保留名。")
+
+    def _refresh_grade_combo():
+        cb_grade['values'] = color_grade.template_names(GRADE_TEMPLATES)
+
+    def _save_grade_template():
+        from tkinter import messagebox
+        try:
+            color_grade.save_template(get_base_dir(), v_grade_name.get(),
+                                      _grade_edit_vars())
+        except Exception as e:
+            messagebox.showerror('保存失败', str(e), parent=win)
+            return
+        refresh_globals_from_ini()
+        _refresh_grade_combo()
+        v_grade.set(color_grade._clean_name(v_grade_name.get()))
+        messagebox.showinfo('已保存', f"模板「{v_grade.get()}」已保存到 用户设置.ini",
+                            parent=win)
+
+    def _delete_grade_template():
+        from tkinter import messagebox
+        name = v_grade.get()
+        if color_grade.is_builtin(name):
+            messagebox.showinfo('内置模板', '内置模板不能删除，只能覆盖。', parent=win)
+            return
+        if name in (color_grade.OFF_TEMPLATE, _EDIT) or not name:
+            return
+        if not messagebox.askyesno('删除模板', f'删除模板「{name}」？', parent=win):
+            return
+        color_grade.delete_template(get_base_dir(), name)
+        refresh_globals_from_ini()
+        _refresh_grade_combo()
+        v_grade.set(color_grade.OFF_TEMPLATE)
+
+    b_row = ttk.Frame(c1)
+    b_row.grid(row=3, column=0, columnspan=2, sticky='w', pady=(4, 0))
+    ttk.Button(b_row, text="另存为模板", command=_save_grade_template).pack(side='left')
+    ttk.Button(b_row, text="删除", command=_delete_grade_template).pack(side='left', padx=6)
+
+    c2 = ttk.LabelFrame(c_wrap, text="参数（编辑后用左上名字另存）", padding=10)
+    c2.grid(row=0, column=1, sticky='nsew')
+    c2.columnconfigure(1, weight=1)
+    add_scale(c2, 0, "曝光(EV):", v_g_expo, -200, 200, "%.2f", 100,
+              tip="整体明暗，单位 EV（0.5 ≈ 半档）。")
+    add_scale(c2, 1, "对比:", v_g_cont, 50, 150, "%.2f", 100,
+              tip="1.0 = 原样，越大反差越强（绕 18% 灰）。")
+    add_scale(c2, 2, "高光:", v_g_hi, 0, 30, "%.2f", 100,
+              tip="压暗亮部（天空/白墙不炸），0 = 不压。")
+    add_scale(c2, 3, "阴影:", v_g_sh, 0, 50, "%.3f", 1000,
+              tip="提亮暗部，0 = 不提。")
+    add_scale(c2, 4, "饱和:", v_g_sat, 0, 160, "%.2f", 100,
+              tip="1.0 = 原样，0 = 黑白；近中性色（肤色/灰面）自动保护。")
+    add_scale(c2, 5, "色温:", v_g_temp, -100, 100, "%.2f", 100,
+              tip="正 = 暖（偏黄），负 = 冷（偏蓝）。")
+    add_scale(c2, 6, "色调:", v_g_tint, -100, 100, "%.2f", 100,
+              tip="正 = 偏品红，负 = 偏绿。")
+    add_scale(c2, 7, "黑点:", v_g_black, 0, 20, "%.3f", 1000,
+              tip="切掉暗部底噪的线性黑点，白点保持不变。\n照片建议用下面的「自动」。")
+    cb_gauto = ttk.Checkbutton(c2, text="黑点按图像自动（推荐）", variable=v_g_auto)
+    cb_gauto.grid(row=8, column=0, columnspan=3, sticky='w', pady=(4, 0))
+    ToolTip(cb_gauto, "按照片自身暗部（线性 P0.5）定黑点，上限 0.012。\n"
+                      "视频那条 look 的固定黑点 0.012 会把照片暗部吃掉，故改自适应。")
+    ttk.Label(tab_c, text="「视频感」= 原 _lut/N-Log_to_Rec709_Standard.cube 的 look 移植"
+                          "（.cube 是 N-Log 输入的，不能直接套照片）",
+              foreground='#666666').pack(anchor='w', pady=(8, 0))
+    _load_grade_ui(v_grade.get())
+    GRADE_TEMPLATES[_EDIT] = _grade_edit_vars()
+    v_grade_preview.set(v_grade.get())
+
     f5 = ttk.LabelFrame(outer, text=" 实时预览（六种样式同步更新） ", padding=8)
     f5.grid(row=0, column=1, sticky='ns')
     pv_cells = {}     # style -> (canvas, caption_label)
@@ -3584,7 +3784,7 @@ def select_paths_gui() -> tuple:
     # 左列：样式 + 照片选择 + 按钮
     left_col = tk.Frame(frame, bg='#f5f7fa')
     left_col.grid(row=0, column=0, sticky='nsew')
-    left_col.rowconfigure(1, weight=1)  # 照片选择区拉伸填满，消除底部留白
+    left_col.rowconfigure(2, weight=1)  # 照片选择区拉伸填满，消除底部留白
 
     # 样式选择区
     sf = ttk.LabelFrame(left_col, text=" 水印样式（可多选） ", padding=12)
@@ -3599,9 +3799,53 @@ def select_paths_gui() -> tuple:
         # 勾选变化 → 即时刷新预览
         style_vars[key].trace_add('write', lambda *a: on_style_changed())
 
+    # 调色模板（只作用于照片本体；「原图」=关闭）
+    def _on_grade_template(*_a):
+        global GRADE_TEMPLATE
+        name = grade_var_local.get()
+        if name == GRADE_TEMPLATE:
+            return
+        GRADE_TEMPLATE = name
+        refresh_main_preview()
+        update_ini_value('基础设置', '调色模板', name)
+
+    def _on_grade_strength(v):
+        global GRADE_STRENGTH
+        val = int(round(float(v)))
+        if val == GRADE_STRENGTH:
+            return
+        GRADE_STRENGTH = val
+        grade_lb.config(text=f"{val}")
+        refresh_main_preview()
+
+    def _persist_grade_strength(_e=None):
+        update_ini_value('基础设置', '调色强度', str(GRADE_STRENGTH))
+
+    gf = ttk.LabelFrame(left_col, text=" 调色模板 ", padding=10)
+    gf.grid(row=1, column=0, sticky='ew', pady=(0, 10))
+    grade_row = ttk.Frame(gf)
+    grade_row.pack(fill='x')
+    ttk.Label(grade_row, text="模板:").pack(side='left')
+    grade_var_local = tk.StringVar(value=GRADE_TEMPLATE or color_grade.OFF_TEMPLATE)
+    grade_cb = ttk.Combobox(grade_row, textvariable=grade_var_local,
+                            values=color_grade.template_names(GRADE_TEMPLATES),
+                            state='readonly', width=10)
+    grade_cb.pack(side='left', padx=(4, 14))
+    ttk.Label(grade_row, text="强度:").pack(side='left')
+    grade_sv = tk.IntVar(value=GRADE_STRENGTH)
+    grade_sc = ttk.Scale(grade_row, from_=0, to=100, variable=grade_sv, length=90,
+                         command=_on_grade_strength)
+    grade_sc.pack(side='left', padx=(4, 6))
+    grade_lb = ttk.Label(grade_row, text=f"{GRADE_STRENGTH}", width=3)
+    grade_lb.pack(side='left')
+    grade_var_local.trace_add('write', _on_grade_template)
+    grade_sc.bind('<ButtonRelease-1>', _persist_grade_strength)
+    ttk.Label(gf, text="只作用于照片本色，边框与水印不受影响；自定义模板在「设置 → 调色」里编辑",
+              style='Desc.TLabel').pack(anchor='w', pady=(6, 0))
+
     # 照片选择区
     pf = ttk.LabelFrame(left_col, text=" 选择要处理的照片 ", padding=10)
-    pf.grid(row=1, column=0, sticky='nsew', pady=(0, 10))
+    pf.grid(row=2, column=0, sticky='nsew', pady=(0, 10))
     btns_row = ttk.Frame(pf)
     btns_row.pack(fill='x')
     ttk.Button(btns_row, text="选择照片（可多选）", command=pick_files,
@@ -3640,7 +3884,7 @@ def select_paths_gui() -> tuple:
 
     # 底部按钮
     btm = ttk.Frame(left_col)
-    btm.grid(row=2, column=0, sticky='sew')
+    btm.grid(row=3, column=0, sticky='sew')
     # 底部只保留流程按钮，靠右排列（“设置”已在标题栏右侧）
     btn_start = ttk.Button(btm, text="开始处理", command=confirm_start,
                            style='Primary.TButton', state='disabled')
@@ -3987,8 +4231,30 @@ def main():
         action='store_true',
         help='预览模式：显示效果但不保存文件',
     )
+    parser.add_argument(
+        '--grade',
+        default=None,
+        metavar='模板名',
+        help='调色模板（如 标准/视频感/清新/暖调/黑白，或自定义模板名；原图=不调色）',
+    )
+    parser.add_argument(
+        '--grade-strength',
+        type=int,
+        default=None,
+        metavar='0-100',
+        help='调色强度（0-100，默认读配置）',
+    )
 
     args = parser.parse_args()
+
+    # 调色模板：命令行优先，其次 ini（原图/未知名 → 不调色）
+    if args.grade is not None or args.grade_strength is not None:
+        global GRADE_TEMPLATE, GRADE_STRENGTH
+        if args.grade is not None:
+            GRADE_TEMPLATE = args.grade
+        if args.grade_strength is not None:
+            GRADE_STRENGTH = max(0, min(100, int(args.grade_strength)))
+        print(f"  调色模板: {GRADE_TEMPLATE}（强度 {GRADE_STRENGTH}）")
 
     # 是否显式指定了样式（未指定且拖入多个文件时，弹出样式选择窗口）
     style_explicit = hasattr(args, 'style')

@@ -36,6 +36,19 @@ def read_raw_as_gray(raw_path, half_size=False):
     return gray
 
 
+def sharpness_score(gray):
+    """单帧锐度：3x3 拉普拉斯方差（越大越锐）。
+
+    输入应是 read_raw_as_gray(half_size=True) 的半尺寸灰度：rawpy 的
+    half_size 解码已按 2x2 合并像素，噪声被天然压掉，直接求梯度即可——
+    若再降采样到 1/4 分辨率，几像素的运动模糊会被抹平（实测 46 帧防抖
+    A/B 组：与全分辨率真值的排序一致性 0.840 vs 0.997，门控决策一致率
+    27% vs 97%）。无参考帧依赖，单帧即可判定；得分只在同一解码尺度下
+    可比，门控按组内相对比例取阈，绝对值无意义。
+    """
+    return float(cv2.Laplacian(gray.astype(np.float64), cv2.CV_64F, ksize=3).var())
+
+
 def estimate_shift(ref_gray, target_gray, crop_ratio=0.6):
     """
     中心裁切 + 相位相关估计位移
@@ -131,6 +144,8 @@ def align_all_frames(raw_files, ref_idx, half_size=True):
 
     返回:
         shifts: [(dx, dy), ...] 每帧位移
+        sharp:  [score, ...] 每帧单帧锐度（LapVar2x，与 raw_files 同序，
+                供选帧阶段的糊片门控使用；复用本函数已解码的灰度图，零额外成本）
     """
     n = len(raw_files)
 
@@ -139,6 +154,8 @@ def align_all_frames(raw_files, ref_idx, half_size=True):
     ref_gray = read_raw_as_gray(raw_files[ref_idx], half_size=half_size)
 
     shifts = [(0.0, 0.0)] * n
+    sharp = [0.0] * n
+    sharp[ref_idx] = sharpness_score(ref_gray)
 
     for i, f in enumerate(raw_files):
         if i == ref_idx:
@@ -153,6 +170,7 @@ def align_all_frames(raw_files, ref_idx, half_size=True):
             dy *= 2
 
         shifts[i] = (dx, dy)
+        sharp[i] = sharpness_score(tgt_gray)
 
         dist = (dx**2 + dy**2)**0.5
         frac_x = abs(dx) % 1
@@ -163,4 +181,4 @@ def align_all_frames(raw_files, ref_idx, half_size=True):
         del tgt_gray
 
     print()
-    return shifts
+    return shifts, sharp
