@@ -54,7 +54,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v1.7.4'
+VERSION = 'v2.0.0'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
@@ -3000,7 +3000,7 @@ def choose_style_gui(default_style: str = '') -> str:
                      font=small_font)
     gh_lb.pack(side='left')
     gh_lb.bind('<Button-1>', lambda e: webbrowser.open(PROJECT_URL))
-    tk.Label(footer, text=f"v{VERSION}", fg='#999999', font=small_font).pack(side='right')
+    tk.Label(footer, text=VERSION, fg='#999999', font=small_font).pack(side='right')
 
     # 居中显示（保证足够大）
     root.update_idletasks()
