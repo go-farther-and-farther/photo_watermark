@@ -48,11 +48,48 @@ STATUS_DISPLAY = {
 }
 
 
+class ToolTip:
+    """悬停提示：鼠标停 800ms 弹出说明气泡（术语解释不占界面）"""
+
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self._tip = None
+        self._after = None
+        widget.bind('<Enter>', self._schedule)
+        widget.bind('<Leave>', self._hide)
+        widget.bind('<ButtonPress>', self._hide)
+
+    def _schedule(self, _e):
+        self._hide()
+        self._after = self.widget.after(800, self._show)
+
+    def _show(self):
+        if self._tip is not None:
+            return
+        x = self.widget.winfo_rootx() + 12
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self._tip = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f'+{x}+{y}')
+        tk.Label(tw, text=self.text, justify='left', bg='#ffffe0', fg='#333',
+                 relief='solid', borderwidth=1, wraplength=460,
+                 font=('Microsoft YaHei UI', 9)).pack()
+
+    def _hide(self, _e=None):
+        if self._after is not None:
+            self.widget.after_cancel(self._after)
+            self._after = None
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+
+
 class App:
     def __init__(self, root):
         self.root = root
         root.title('手持多帧超分辨率合成（连拍分组版）')
-        root.geometry('1200x780')
+        root.geometry('1240x780')
         self.q = queue.Queue()
         self.verdicts = []          # sr_suggest.Verdict 列表（与表格行号一一对应）
         self.checked = set()        # 勾选的组号（1 起）
@@ -92,37 +129,58 @@ class App:
             ('核心数', self.var_threads, 5, '0=全部核心；填 8 只用 P 核，功耗温度大幅下降'),
         ]:
             ttk.Label(f3, text=lab).pack(side='left', padx=(10, 2))
-            ttk.Entry(f3, textvariable=var, width=w).pack(side='left')
+            e = ttk.Entry(f3, textvariable=var, width=w)
+            e.pack(side='left')
+            ToolTip(e, tip)
 
         # 复选框单独一行：单行 pack 不换行，塞进参数行会被窗宽裁掉（实测）
         f3b = ttk.Frame(self.root); f3b.pack(fill='x', **pad)
-        ttk.Checkbutton(f3b, text='去鬼影', variable=self.var_deghost).pack(side='left', padx=(14, 2))
-        # DNG 母版：LR 里 Kelvin 色温/相机配置/镜头矫正全可用（RAW 组生效，JPG 组自动回退 TIF）
+        c = ttk.Checkbutton(f3b, text='去鬼影', variable=self.var_deghost)
+        c.pack(side='left', padx=(14, 2))
+        ToolTip(c, '多张连拍自动去掉画面里移动/变化的部分（人物走动等），避免重影')
+        # DNG 底片：LR 里色温/相机配置/镜头矫正全可用（RAW 组生效，JPG 组自动回退 TIF）
         self.var_dng = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3b, text='DNG母版(色温可调)', variable=self.var_dng).pack(side='left', padx=2)
-        # 1.5x 压缩母版是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
+        c = ttk.Checkbutton(f3b, text='DNG底片(色温可调)', variable=self.var_dng)
+        c.pack(side='left', padx=2)
+        ToolTip(c, '输出类似"数码底片"的 DNG：白平衡、色温、镜头矫正全部留到 Lightroom 里随便调。\n'
+                   'JPG 素材的组不支持，自动改出 TIF')
+        # 1.5x 压缩是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
         self.var_master = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f3b, text='1.5x压缩母版TIF', variable=self.var_master).pack(side='left', padx=6)
-        ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif).pack(side='left', padx=2)
-        # RL 反卷积锐化：只烙进 JPG 预览，母版 DNG 永远保持线性原样
+        c = ttk.Checkbutton(f3b, text='1.5x压缩TIF', variable=self.var_master)
+        c.pack(side='left', padx=6)
+        ToolTip(c, '额外多出一份 1.5 倍的压缩 TIF（高像素机身时代选项，2400 万像素一般用不上）')
+        c = ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif)
+        c.pack(side='left', padx=2)
+        ToolTip(c, '额外保存一份全尺寸 16bit 无损 TIF（不压缩，体积很大，适合打印/精修）')
+        # JPG 锐化：只影响 JPG，DNG 底片永远保持原样
         self.var_rl = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3b, text='JPG反卷积锐化', variable=self.var_rl).pack(side='left', padx=(14, 2))
-        # K14 外挂引擎（闭源，仅本机授权使用；商用/分发前须向作者确认许可）
+        c = ttk.Checkbutton(f3b, text='JPG更锐利', variable=self.var_rl)
+        c.pack(side='left', padx=(14, 2))
+        ToolTip(c, '输出的 JPG 先做智能锐化，看起来更锐；只影响 JPG，DNG 底片保持原始数据')
+
+        # 第二行：画质增强 + 外部引擎（语义分组，也不再受窗宽裁切）
+        f3c = ttk.Frame(self.root); f3c.pack(fill='x', **pad)
+        # 画质增强三项合一：透视精修对齐 + 逐块视差校正 + 清晰帧智能加权，
+        # 全部默认最优、各自带自动兜底（不适用时自动退回保守模式），无需分别关
+        self.var_enhance = tk.BooleanVar(value=True)
+        c = ttk.Checkbutton(f3c, text='画质增强(推荐)', variable=self.var_enhance)
+        c.pack(side='left', padx=(14, 2))
+        ToolTip(c, '三项自动画质增强：更准的画面对齐（透视+局部）、清晰帧多出力模糊帧少出力。\n'
+                   '全部自动兜底，遇到不适用的情况会自己退回保守模式；个别画质异常时才需要关掉。\n'
+                   '需要单独控制请用命令行参数 --no-homography / --no-noise-weight / --no-local-align')
+        # K14 外部 AI 引擎（闭源，仅本机授权使用；商用/分发前须向作者确认许可）
         self.var_engine14 = tk.BooleanVar(value=False)
         self.var_k14 = tk.StringVar(value=_k14_cfg)
-        ttk.Checkbutton(f3b, text='K14外挂引擎', variable=self.var_engine14).pack(side='left', padx=(14, 2))
-        self._btn_k14 = ttk.Button(f3b, text='K14后端…', command=self._pick_k14)
+        c = ttk.Checkbutton(f3c, text='K14增强(AI)', variable=self.var_engine14)
+        c.pack(side='left', padx=(14, 2))
+        ToolTip(c, '改用外部 K14 神经网络引擎合成（效果更好，需本机装有 JSR/Bridge 并指定位置）。\n'
+                   '仅支持 2x；该引擎是他人的闭源软件，仅限本机自己使用')
+        self._btn_k14 = ttk.Button(f3c, text='K14后端…', command=self._pick_k14)
         self._btn_k14.pack(side='left', padx=2)
+        ToolTip(self._btn_k14, '选择 K14 引擎程序的位置（JSR/Bridge 目录 resources 下的\n'
+                               'jsr_fast_k14_backend.exe）；选过一次会记住')
         if self.var_k14.get():
             self._btn_k14.configure(text='K14后端✓')
-        # K14 路线借鉴项：单应 ECC 精修（补透视项，残差不降 2% 自动退回欧氏）
-        # + 实测残差融合加权（锐帧多信、糊帧少信）
-        self.var_homo = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3b, text='单应对齐(透视精修)', variable=self.var_homo).pack(side='left', padx=(14, 2))
-        self.var_nwt = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3b, text='噪声加权(锐帧多信)', variable=self.var_nwt).pack(side='left', padx=(14, 2))
-        self.var_local = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3b, text='局部对齐(视差校正)', variable=self.var_local).pack(side='left', padx=(14, 2))
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
         ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)
@@ -314,9 +372,7 @@ class App:
         threads = self.var_threads.get()
         keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
-        homo = self.var_homo.get()
-        nwt = self.var_nwt.get()
-        local_al = self.var_local.get()
+        enhance = self.var_enhance.get()
         use_k14 = self.var_engine14.get()
         k14 = self.var_k14.get().strip() or None
         if use_k14 and not k14:
@@ -365,9 +421,9 @@ class App:
                                     output_dng=use_dng,
                                     rl_sharpen=rl,
                                     k14_backend=(k14 if use_k14 else None),
-                                    use_homography=homo,
-                                    use_noise_weight=nwt,
-                                    use_local_align=local_al)
+                                    use_homography=enhance,
+                                    use_noise_weight=enhance,
+                                    use_local_align=enhance)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:

@@ -230,7 +230,7 @@ def _judge_sample(files, sample, start_time, max_shift, allow_extend):
     dropped = len(sample) - len(still)
     extra = f"，已剔除 {dropped} 帧" if dropped else ""
     return Verdict(files, start_time, "ok",
-                   f"建议用 {suggested} 帧{extra}（位移 {max_dist:.1f}px，亚像素分散 {spread:.2f}px）",
+                   f"建议用 {suggested} 帧{extra}（画面移动 {max_dist:.1f}px，帧间抖动差异 {spread:.2f}px）",
                    suggested_frames=suggested,
                    metrics={"max_shift_px": max_dist, "subpixel_spread_px": spread})
 
