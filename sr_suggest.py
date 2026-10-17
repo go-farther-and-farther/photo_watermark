@@ -235,7 +235,7 @@ def _judge_sample(files, sample, start_time, max_shift, allow_extend):
                    metrics={"max_shift_px": max_dist, "subpixel_spread_px": spread})
 
 
-def judge_group(files, done_registry=None, sample_frames=8, max_shift=50.0, start_time=0.0):
+def judge_group(files, done_registry=None, sample_frames=8, max_shift=150.0, start_time=0.0):
     """第二层·深判：一组连拍可否超分
 
     时间均匀抽 sample_frames 帧（不整组解码，控耗时）判定；位移/内容超限的帧

@@ -19,7 +19,7 @@ try:
     _cfg.read(os.path.join(_exe_dir, 'sr_gui.ini'), encoding='utf-8')
 except Exception:
     pass
-_threads_cfg = _cfg.getint('run', 'threads', fallback=8)
+_threads_cfg = _cfg.getint('run', 'threads', fallback=0)
 _k14_cfg = _cfg.get('run', 'k14_backend', fallback='')
 if _threads_cfg > 0:
     for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
@@ -114,7 +114,7 @@ class App:
         f3 = ttk.Frame(self.root); f3.pack(fill='x', **pad)
         self.var_gap = tk.DoubleVar(value=2.0)
         self.var_min = tk.IntVar(value=4)
-        self.var_topk = tk.IntVar(value=8)
+        self.var_topk = tk.IntVar(value=12)
         self.var_scale = tk.IntVar(value=2)
         self.var_sharpen = tk.DoubleVar(value=0.3)
         self.var_deghost = tk.BooleanVar(value=True)
@@ -405,14 +405,12 @@ class App:
                         if v.start_time else f'{gi:02d}0000'
                     base = self._unique_base(dst, tstr, gi, scale, master, use_dng)
                     self.q.put(f'[{k}/{total}] 组{gi:02d} {len(v.files)}帧: 合成中…')
-                    tmp = Path(dst) / f'.tmp_g{gi}'
-                    tmp.mkdir(exist_ok=True)
-                    for p in v.files:
-                        shutil.copy(str(p), str(tmp / p.name))
                     buf = io_log()
                     try:
                         with Redirector(buf):
-                            process(str(tmp), str(base) + '.tif', scale=scale,
+                            # 文件清单直传：不再拷贝临时文件夹（省时省盘）
+                            process(files=list(v.files), output_path=str(base) + '.tif',
+                                    scale=scale,
                                     max_frames=topk,
                                     use_deghost=deghost,
                                     sharpen=sharpen,
@@ -428,13 +426,10 @@ class App:
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:
                         self.q.put(f'  [跳过] {e}')
-                        clean_tmp(tmp)
                         continue
                     except Exception as e:
                         self.q.put(f'  [失败] {e}')
-                        clean_tmp(tmp)
                         continue
-                    clean_tmp(tmp)
                     jpg = Path(f'{base}_{scale}x.jpg')
                     kept_master = None
                     dng_path = Path(f'{base}_{scale}x.dng')

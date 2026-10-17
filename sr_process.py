@@ -9,7 +9,9 @@
 
 import argparse
 import gc
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -251,23 +253,36 @@ def derive_camera_to_srgb(ref_path):
         return None
 
 
-def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48):
+def _worker_count(threads):
+    """并行块数：threads>0 用之，0=全部核心；上限 8（每 worker 峰值内存数百 MB）"""
+    n = threads if threads and threads > 0 else (os.cpu_count() or 4)
+    return max(1, min(int(n), 8))
+
+
+def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48, workers=0):
     """Richardson-Lucy 反卷积（高斯 PSF），分块流式，uint16 进出
 
     JPG/预览的可选锐化：反卷积恢复单帧共有的光学+手持模糊（对齐/选帧都无法
     修复的分量），锐度可到 SRHQ v2.5 水平。母版 DNG 保持线性原样——锐化是
     渲染观感，不进 raw 数据。分块+halo：97MP 全幅三次浮点副本会吃 4GB+，
     流式后峰值 <300MB；halo 远大于 3σ，核心区无边界伪迹。
+    迭代间串行（12 轮依赖上一轮），迭代内的块互相独立——多线程并行。
     """
     obs = arr_u16.astype(np.float32) / 65535.0
     est = obs.copy()
     h, w = est.shape[:2]
     eps = 1e-4
-    for _ in range(iterations):
-        prev = est
-        est = np.empty_like(est)
-        for y0 in range(0, h, tile):
-            for x0 in range(0, w, tile):
+    blocks = [(y0, x0) for y0 in range(0, h, tile) for x0 in range(0, w, tile)]
+    nw = _worker_count(workers)
+    cv_prev = cv2.getNumThreads()
+    if nw > 1:
+        cv2.setNumThreads(1)   # 块间并行，块内 cv2 不再叠线程（避免超订）
+    try:
+        for _ in range(iterations):
+            prev = est
+            est = np.empty_like(est)
+
+            def rl_block(y0, x0):
                 y1, x1 = min(y0 + tile, h), min(x0 + tile, w)
                 ya, yb = max(0, y0 - halo), min(h, y1 + halo)
                 xa, xb = max(0, x0 - halo), min(w, x1 + halo)
@@ -276,11 +291,22 @@ def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48):
                 dist = cv2.GaussianBlur(e, (0, 0), sigma)
                 ratio = o / np.maximum(dist, eps)
                 corr = cv2.GaussianBlur(ratio, (0, 0), sigma)
-                est[y0:y1, x0:x1] = np.clip(
+                return y0, x0, np.clip(
                     e[y0-ya:y1-ya, x0-xa:x1-xa] * corr[y0-ya:y1-ya, x0-xa:x1-xa],
                     0.0, 1.0)
-        del prev
-        gc.collect()
+
+            if nw > 1:
+                with ThreadPoolExecutor(max_workers=nw) as ex:
+                    for y0, x0, blk in ex.map(lambda b: rl_block(b[0], b[1]), blocks):
+                        est[y0:y0 + min(tile, h - y0), x0:x0 + min(tile, w - x0)] = blk
+            else:
+                for y0, x0 in blocks:
+                    _, _, blk = rl_block(y0, x0)
+                    est[y0:y0 + min(tile, h - y0), x0:x0 + min(tile, w - x0)] = blk
+            del prev
+            gc.collect()
+    finally:
+        cv2.setNumThreads(cv_prev)
     return (est * 65535.0 + 0.5).astype(np.uint16)
 
 
@@ -381,7 +407,7 @@ def find_input_files(folder_path):
     return files
 
 
-def select_best_frames(raw_files, shifts, ref_idx, max_frames=16, max_shift=50.0):
+def select_best_frames(raw_files, shifts, ref_idx, max_frames=16, max_shift=150.0):
     """选择最佳帧"""
     n = len(raw_files)
     if n <= max_frames:
@@ -685,7 +711,7 @@ def _apply_field(off, SX, SY, tile_full=256):
 
 def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False,
               blur_gate=True, use_homography=True, use_noise_weight=True,
-              use_local_align=True):
+              use_local_align=True, workers=0):
     """
     超分辨率重建 v2：SR 网格直接融合
 
@@ -713,12 +739,14 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
 
     # 帧缓存：uint16（45MP 一帧 float32 要 540MB，16 帧装不下）
     print("  读入帧缓存 (uint16)...")
+    _tc = time.time()
     frames = []
     for f in raw_files:
         img = read_raw_full(f, camera_space=camera_linear)
         frames.append((np.clip(img, 0.0, 1.0) * 65535.0).astype(np.uint16))
         del img
         gc.collect()
+    print(f"  [计时] 读帧 {time.time() - _tc:.1f}s")
 
     # 位移精修（平移+旋转）+ 光度校正参数
     ref_u16 = frames[ref_idx]
@@ -729,6 +757,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     biases = np.zeros(n, dtype=np.float32)
     warps = [np.eye(3, dtype=np.float64) for _ in range(n)]   # ref->frame 全尺寸
     proj = [False] * n                                        # 该帧是否含透视项
+    _ta = time.time()
     motion_frac = np.zeros(n, dtype=np.float32)
     blur_rms = np.full(n, np.nan, dtype=np.float32)
     max_rot = 0.0
@@ -799,6 +828,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
               f"旋转={rot:+7.3f}°{extra} 增益={gains[i]:.4f} 偏置={biases[i]:+.4f} "
               f"运动占比={motion_frac[i]:.1%} 模糊RMS={blur_rms[i]:.4f}")
         del fg, fg_half
+    print(f"  [计时] 精修 {time.time() - _ta:.1f}s")
     del ref_gray          # ref_half 留给局部对齐阶段（~10MB）
     gc.collect()
 
@@ -840,6 +870,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     # 最近物体的帧间分歧全局模型吃不掉（实测可达数像素），场修正残差
     # 须优于全局（≤0.98×）才采纳，任何情况不差于纯全局 warp。
     fields = {}
+    _tl = time.time()
     if use_local_align:
         hh, hw = ref_half.shape
         for i in usable:
@@ -879,6 +910,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
         if fields:
             print(f"  局部对齐生效帧: {','.join(raw_files[i].stem for i in fields)}")
             gc.collect()
+        print(f"  [计时] 局部对齐 {time.time() - _tl:.1f}s")
 
     gains_u = gains[usable]
     biases_u = biases[usable]
@@ -922,52 +954,74 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     print(f"  重叠区域: ({crop_x0},{crop_y0}) {crop_w}x{crop_h}")
     print(f"  超分输出: {sr_w}x{sr_h}")
 
-    # 分块鲁棒融合
+    # 分块鲁棒融合（块间独立——多线程并行；remap/GaussianBlur 释放 GIL）
     out = np.zeros((sr_h, sr_w, 3), dtype=np.uint16)
     sx_base = (np.arange(sr_w, dtype=np.float32) + 0.5) / scale - 0.5 + crop_x0
     sy_base = (np.arange(sr_h, dtype=np.float32) + 0.5) / scale - 0.5 + crop_y0
     robust = use_deghost and n >= 3
     any_proj = any(proj[i] for i in usable)
+    _tf = time.time()
     if any_proj:
         names = ','.join(raw_files[i].stem for i in usable if proj[i])
         print(f"  透视warp生效帧: {names}")
-    for ty in range(0, sr_h, tile):
+    tile_jobs = [(ty, tx) for ty in range(0, sr_h, tile) for tx in range(0, sr_w, tile)]
+    nw = _worker_count(workers)
+
+    def fuse_tile(ty, tx):
         th = min(tile, sr_h - ty)
-        for tx in range(0, sr_w, tile):
-            tw = min(tile, sr_w - tx)
-            SX, SY = np.meshgrid(sx_base[tx:tx + tw], sy_base[ty:ty + th])
-            S = np.empty((len(usable), th, tw, 3), dtype=np.float32)
-            for j, i in enumerate(usable):
-                if any_proj:
-                    mx, my = _proj_coords(warps[i], SX, SY)
-                else:
-                    # 纯平移/旋转组：仿射快路径，与局部对齐引入前的输出逐位一致
-                    A = warps[i][:2].astype(np.float32)
-                    mx = (A[0, 0] * SX + A[0, 1] * SY + A[0, 2]).astype(np.float32)
-                    my = (A[1, 0] * SX + A[1, 1] * SY + A[1, 2]).astype(np.float32)
-                if i in fields:
-                    dxf, dyf = _apply_field(fields[i], SX, SY)
-                    mx = mx + dxf
-                    my = my + dyf
-                S[j] = cv2.remap(frames[i], mx.astype(np.float32), my.astype(np.float32),
-                                 interpolation=cv2.INTER_CUBIC,
-                                 borderMode=cv2.BORDER_REPLICATE)
-            S -= biases_u[:, None, None, None]
-            S *= gains_u[:, None, None, None]
-            if robust:
-                med = np.median(S, axis=0)
-                rel = np.abs(S - med[None]).mean(axis=3) / (1310.0 + med.mean(axis=2))
-                wmat = 1.0 / (1.0 + (rel / 0.25) ** 2)
-                if w_us is not None:
-                    wmat = wmat * w_us[:, None, None]
-                val = (S * wmat[..., None]).sum(axis=0) / np.maximum(wmat.sum(axis=0), 1e-6)[..., None]
-            elif w_us is not None:
-                val = (S * w_us[:, None, None, None]).sum(axis=0) / float(w_us.sum())
+        tw = min(tile, sr_w - tx)
+        SX, SY = np.meshgrid(sx_base[tx:tx + tw], sy_base[ty:ty + th])
+        S = np.empty((len(usable), th, tw, 3), dtype=np.float32)
+        for j, i in enumerate(usable):
+            if any_proj:
+                mx, my = _proj_coords(warps[i], SX, SY)
             else:
-                val = S.mean(axis=0)
-            out[ty:ty + th, tx:tx + tw] = np.clip(val + 0.5, 0, 65535).astype(np.uint16)
-        print(f"\r  融合: {min(ty + tile, sr_h)}/{sr_h} 行", end="", flush=True)
+                # 纯平移/旋转组：仿射快路径，与局部对齐引入前的输出逐位一致
+                A = warps[i][:2].astype(np.float32)
+                mx = (A[0, 0] * SX + A[0, 1] * SY + A[0, 2]).astype(np.float32)
+                my = (A[1, 0] * SX + A[1, 1] * SY + A[1, 2]).astype(np.float32)
+            if i in fields:
+                dxf, dyf = _apply_field(fields[i], SX, SY)
+                mx = mx + dxf
+                my = my + dyf
+            S[j] = cv2.remap(frames[i], mx.astype(np.float32), my.astype(np.float32),
+                             interpolation=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_REPLICATE)
+        S -= biases_u[:, None, None, None]
+        S *= gains_u[:, None, None, None]
+        if robust:
+            med = np.median(S, axis=0)
+            rel = np.abs(S - med[None]).mean(axis=3) / (1310.0 + med.mean(axis=2))
+            wmat = 1.0 / (1.0 + (rel / 0.25) ** 2)
+            if w_us is not None:
+                wmat = wmat * w_us[:, None, None]
+            val = (S * wmat[..., None]).sum(axis=0) / np.maximum(wmat.sum(axis=0), 1e-6)[..., None]
+        elif w_us is not None:
+            val = (S * w_us[:, None, None, None]).sum(axis=0) / float(w_us.sum())
+        else:
+            val = S.mean(axis=0)
+        return ty, tx, np.clip(val + 0.5, 0, 65535).astype(np.uint16)
+
+    cv_prev = cv2.getNumThreads()
+    done = 0
+    if nw > 1:
+        cv2.setNumThreads(1)   # 块间并行，块内 cv2 不再叠线程（避免超订）
+        try:
+            with ThreadPoolExecutor(max_workers=nw) as ex:
+                for ty, tx, blk in ex.map(lambda t: fuse_tile(t[0], t[1]), tile_jobs):
+                    out[ty:ty + min(tile, sr_h - ty), tx:tx + min(tile, sr_w - tx)] = blk
+                    done += 1
+                    print(f"\r  融合: {done}/{len(tile_jobs)} 块", end="", flush=True)
+        finally:
+            cv2.setNumThreads(cv_prev)
+    else:
+        for ty, tx in tile_jobs:
+            rty, rtx, blk = fuse_tile(ty, tx)
+            out[rty:rty + min(tile, sr_h - rty), rtx:rtx + min(tile, sr_w - rtx)] = blk
+            done += 1
+            print(f"\r  融合: {done}/{len(tile_jobs)} 块", end="", flush=True)
     print()
+    print(f"  [计时] 融合 {time.time() - _tf:.1f}s")
     del frames
     gc.collect()
 
@@ -1149,16 +1203,20 @@ def load_subifd_rgb(dng_path):
     raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
 
 
-def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
+def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=150.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
             rl_sharpen=True, blur_gate=True, k14_backend=None,
-            use_homography=True, use_noise_weight=True, use_local_align=True):
+            use_homography=True, use_noise_weight=True, use_local_align=True,
+            files=None):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
     不做锐化/降噪/gamma/自动拉伸（调色全部留给 LR，白平衡可调 Kelvin）。
     JPG 组或 ExifTool 缺失时回退 sRGB TIF+JPG。
+
+    files：显式文件清单（Path/str 列表）。给出时跳过 input_folder 扫描——
+    GUI 按组直接传清单，不再拷贝临时文件夹。
     """
     if threads and threads > 0:
         # 限制计算线程数（如只用 P 核 8 线程，控制功耗温度；0 = 全部核心）
@@ -1169,14 +1227,16 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
 
     t0 = time.time()
 
-    raw_files = find_input_files(input_folder)
+    raw_files = [Path(p) for p in files] if files else find_input_files(input_folder)
     n = len(raw_files)
     print(f"  文件数: {n}")
 
     # 找最佳参考帧 + 对齐
     print("\n[1/4] 找最佳参考帧并对齐...")
+    _t1 = time.time()
     ref_idx = find_best_ref_frame(raw_files, half_size=True)
     shifts = align_all_frames(raw_files, ref_idx, half_size=True)
+    print(f"  [计时] 预对齐 {time.time() - _t1:.1f}s")
 
     # 打印位移统计
     dxs = [s[0] for s in shifts]
@@ -1254,7 +1314,7 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             transform = (np.eye(3), np.zeros(3))
         jpg_path = base + f'_{scale}x.jpg'
         print("  JPG:  RL 反卷积锐化（12 iter, σ=1.0）...")
-        big_rl = rl_deconvolve_u16(big)
+        big_rl = rl_deconvolve_u16(big, workers=threads)
         prev = render_srgb_preview(big_rl.astype(np.float32) / 65535.0, transform, stretch=True)
         del big, big_rl
         ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(prev, cv2.COLOR_RGB2BGR),
@@ -1277,6 +1337,7 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
     print(f"\n[3/4] 超分辨率重建 (x{scale}, "
           f"{'旧版对齐融合' if use_legacy else 'SR网格鲁棒融合'}"
           f"{', 线性相机域' if use_dng else ''})...")
+    _t3 = time.time()
     if use_legacy:
         sr_result, (orig_w, orig_h) = reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost)
     else:
@@ -1284,7 +1345,9 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
                                                   tile, camera_linear=use_dng, blur_gate=blur_gate,
                                                   use_homography=use_homography,
                                                   use_noise_weight=use_noise_weight,
-                                                  use_local_align=use_local_align)
+                                                  use_local_align=use_local_align,
+                                                  workers=threads)
+    print(f"  [计时] 重建合计 {time.time() - _t3:.1f}s")
 
     base = str(output_path).rsplit('.', 1)[0]
     ref_frame = raw_files[ref_idx]
@@ -1316,7 +1379,8 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         if rl_sharpen:
             print("  JPG:  RL 反卷积锐化（12 iter, σ=1.0）...")
             preview_jpg_src = rl_deconvolve_u16(
-                (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)).astype(np.float32) / 65535.0
+                (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16),
+                workers=threads).astype(np.float32) / 65535.0
         else:
             preview_jpg_src = sr_result
         preview = render_srgb_preview(preview_jpg_src, transform, stretch=True)
@@ -1477,7 +1541,7 @@ def main():
     parser.add_argument("--output", "-o", default="result.tif", help="输出路径")
     parser.add_argument("--scale", "-s", type=int, default=2, help="倍率")
     parser.add_argument("--max-frames", "-n", type=int, default=16, help="最大使用帧数")
-    parser.add_argument("--max-shift", type=float, default=50.0, help="最大允许位移(像素)")
+    parser.add_argument("--max-shift", type=float, default=150.0, help="最大允许位移(像素)")
     parser.add_argument("--no-deghost", action="store_true", help="禁用去鬼影")
     parser.add_argument("--sharpen", type=float, default=0.3, help="锐化强度")
     parser.add_argument("--denoise", action="store_true", help="启用降噪")
