@@ -1239,7 +1239,7 @@ def load_subifd_rgb(dng_path):
     raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
 
 
-def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=150.0,
+def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=0.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
             rl_sharpen=True, blur_gate=True, k14_backend=None,
@@ -1266,6 +1266,15 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
     raw_files = [Path(p) for p in files] if files else find_input_files(input_folder)
     n = len(raw_files)
     print(f"  文件数: {n}")
+    if not max_shift:
+        try:
+            import rawpy
+            with rawpy.imread(str(raw_files[0])) as _r:
+                _sz = _r.sizes
+            max_shift = max(150, int(0.08 * max(_sz.width, _sz.height)))
+        except Exception:
+            max_shift = 150.0   # 非 RAW 输入（JPG 组）：保底阈值
+    print(f"  位移剔除上限: {max_shift}px（0=自动：画面最大边 8%，保底 150）")
 
     # 找最佳参考帧 + 对齐
     print("\n[1/4] 找最佳参考帧并对齐...")
@@ -1580,7 +1589,8 @@ def main():
     parser.add_argument("--output", "-o", default="result.tif", help="输出路径")
     parser.add_argument("--scale", "-s", type=int, default=2, help="倍率")
     parser.add_argument("--max-frames", "-n", type=int, default=16, help="最大使用帧数")
-    parser.add_argument("--max-shift", type=float, default=150.0, help="最大允许位移(像素)")
+    parser.add_argument("--max-shift", type=float, default=0.0,
+                        help="最大允许位移(像素)，0=自动（画面最大边 8%，保底 150）")
     parser.add_argument("--no-deghost", action="store_true", help="禁用去鬼影")
     parser.add_argument("--sharpen", type=float, default=0.3, help="锐化强度")
     parser.add_argument("--denoise", action="store_true", help="启用降噪")

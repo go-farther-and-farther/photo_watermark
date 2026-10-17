@@ -156,6 +156,15 @@ def scan_photos(folder, gap=2.0, min_frames=4, progress_cb=None, cancel_cb=None)
     return groups, singles
 
 
+def auto_shift_limit(half_shape):
+    """位移剔除上限（全尺寸 px）：画面最大边 8%，保底 150px。
+
+    位移本身对齐可解，不构成剔除理由；上限只防两件事——重叠不足导致
+    相关失效、画幅按交集缩水过多。8% 时画幅最坏损失 ~16%，可接受。
+    """
+    return max(150, int(0.08 * 2 * max(half_shape)))
+
+
 def _judge_sample(files, sample, start_time, max_shift, allow_extend):
     """对给定帧子集做三指标判定；返回 Verdict。
 
@@ -172,6 +181,8 @@ def _judge_sample(files, sample, start_time, max_shift, allow_extend):
     scored.sort(key=lambda x: -x[0])
     ref = scored[0][1]
     ref_g = grays[ref]
+    if not max_shift:
+        max_shift = auto_shift_limit(next(iter(grays.values())).shape)
 
     # 指标一：位移范围（半尺寸相位相关 → 全尺寸 ×2），超限帧剔除
     shift_full = {ref: (0.0, 0.0)}
@@ -235,7 +246,7 @@ def _judge_sample(files, sample, start_time, max_shift, allow_extend):
                    metrics={"max_shift_px": max_dist, "subpixel_spread_px": spread})
 
 
-def judge_group(files, done_registry=None, sample_frames=8, max_shift=150.0, start_time=0.0):
+def judge_group(files, done_registry=None, sample_frames=8, max_shift=0.0, start_time=0.0):
     """第二层·深判：一组连拍可否超分
 
     时间均匀抽 sample_frames 帧（不整组解码，控耗时）判定；位移/内容超限的帧
@@ -265,7 +276,7 @@ def judge_group(files, done_registry=None, sample_frames=8, max_shift=150.0, sta
 
 
 def scan_and_judge(input_folder, output_dir=None, gap=2.0, min_frames=4,
-                   sample_frames=8, max_shift=50.0, progress_cb=None, cancel_cb=None):
+                   sample_frames=8, max_shift=0.0, progress_cb=None, cancel_cb=None):
     """入口：快筛 + 逐组深判。返回 (verdicts, singles_count)。
 
     cancel_cb() 为 True 时停止（已判定的结果保留）；progress_cb(str) 收进度消息。
