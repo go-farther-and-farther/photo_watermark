@@ -12,11 +12,13 @@ a = Analysis(
             ('assets/wordmarks', 'assets/wordmarks'),
            ('assets/fonts', 'assets/fonts'),
            ('C:\\Users\\LQL\\AppData\\Local\\Programs\\ExifTool', 'exiftool')],
-    hiddenimports=[],
+    # imagecodecs：超分读 K14 输出 DNG（无损 JPEG SOF3）懒加载，PyInstaller 探不到
+    hiddenimports=['imagecodecs'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['numpy', 'pandas', 'scipy', 'torch', 'torchvision', 'tensorflow', 'keras', 'matplotlib', 'pygame', 'nltk', 'cryptography', 'sklearn', 'IPython', 'sympy', 'cv2'],
+    # numpy/cv2 不再排除：超分窗口（sr_gui/sr_process，懒加载）依赖它们
+    excludes=['pandas', 'scipy', 'torch', 'torchvision', 'tensorflow', 'keras', 'matplotlib', 'pygame', 'nltk', 'cryptography', 'sklearn', 'IPython', 'sympy'],
     noarchive=False,
     optimize=0,
 )
