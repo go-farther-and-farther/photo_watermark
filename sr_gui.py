@@ -20,6 +20,7 @@ try:
 except Exception:
     pass
 _threads_cfg = _cfg.getint('run', 'threads', fallback=8)
+_k14_cfg = _cfg.get('run', 'k14_backend', fallback='')
 if _threads_cfg > 0:
     for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
         os.environ[_v] = str(_threads_cfg)
@@ -51,7 +52,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title('手持多帧超分辨率合成（连拍分组版）')
-        root.geometry('960x700')
+        root.geometry('1200x780')
         self.q = queue.Queue()
         self.verdicts = []          # sr_suggest.Verdict 列表（与表格行号一一对应）
         self.checked = set()        # 勾选的组号（1 起）
@@ -92,14 +93,28 @@ class App:
         ]:
             ttk.Label(f3, text=lab).pack(side='left', padx=(10, 2))
             ttk.Entry(f3, textvariable=var, width=w).pack(side='left')
-        ttk.Checkbutton(f3, text='去鬼影', variable=self.var_deghost).pack(side='left', padx=(14, 2))
+
+        # 复选框单独一行：单行 pack 不换行，塞进参数行会被窗宽裁掉（实测）
+        f3b = ttk.Frame(self.root); f3b.pack(fill='x', **pad)
+        ttk.Checkbutton(f3b, text='去鬼影', variable=self.var_deghost).pack(side='left', padx=(14, 2))
         # DNG 母版：LR 里 Kelvin 色温/相机配置/镜头矫正全可用（RAW 组生效，JPG 组自动回退 TIF）
         self.var_dng = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3, text='DNG母版(色温可调)', variable=self.var_dng).pack(side='left', padx=2)
+        ttk.Checkbutton(f3b, text='DNG母版(色温可调)', variable=self.var_dng).pack(side='left', padx=2)
         # 1.5x 压缩母版是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
         self.var_master = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f3, text='1.5x压缩母版TIF', variable=self.var_master).pack(side='left', padx=6)
-        ttk.Checkbutton(f3, text='另存全尺寸TIF', variable=self.var_keep_tif).pack(side='left', padx=2)
+        ttk.Checkbutton(f3b, text='1.5x压缩母版TIF', variable=self.var_master).pack(side='left', padx=6)
+        ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif).pack(side='left', padx=2)
+        # RL 反卷积锐化：只烙进 JPG 预览，母版 DNG 永远保持线性原样
+        self.var_rl = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f3b, text='JPG反卷积锐化', variable=self.var_rl).pack(side='left', padx=(14, 2))
+        # K14 外挂引擎（闭源，仅本机授权使用；商用/分发前须向作者确认许可）
+        self.var_engine14 = tk.BooleanVar(value=False)
+        self.var_k14 = tk.StringVar(value=_k14_cfg)
+        ttk.Checkbutton(f3b, text='K14外挂引擎', variable=self.var_engine14).pack(side='left', padx=(14, 2))
+        self._btn_k14 = ttk.Button(f3b, text='K14后端…', command=self._pick_k14)
+        self._btn_k14.pack(side='left', padx=2)
+        if self.var_k14.get():
+            self._btn_k14.configure(text='K14后端✓')
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
         ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)
@@ -261,6 +276,14 @@ class App:
                 return base
             n += 1
 
+    def _pick_k14(self):
+        f = filedialog.askopenfilename(
+            title='选择 Jiangtherapee 的 jsr_fast_k14_backend.exe',
+            filetypes=[('jsr_fast_k14_backend', 'jsr_fast_k14_backend.exe'), ('所有文件', '*.*')])
+        if f:
+            self.var_k14.set(f)
+            self._btn_k14.configure(text='K14后端✓')
+
     def _run(self):
         if not self.verdicts:
             messagebox.showinfo('提示', '请先「① 扫描并判定」')
@@ -282,10 +305,20 @@ class App:
         sharpen = self.var_sharpen.get()
         threads = self.var_threads.get()
         keep_tif = self.var_keep_tif.get()
+        rl = self.var_rl.get()
+        use_k14 = self.var_engine14.get()
+        k14 = self.var_k14.get().strip() or None
+        if use_k14 and not k14:
+            messagebox.showerror('错误', 'K14外挂引擎未设置后端：点「K14后端…」选择 Bridge resources 目录下的 jsr_fast_k14_backend.exe')
+            return
+        if use_k14 and scale != 2:
+            messagebox.showinfo('提示', 'K14 外挂引擎仅支持 2x，本次按 2x 执行')
+            scale = 2
         Path(dst).mkdir(parents=True, exist_ok=True)
         try:
             _c2 = configparser.ConfigParser()
-            _c2['run'] = {'threads': str(threads)}
+            _c2['run'] = {'threads': str(threads),
+                          'k14_backend': self.var_k14.get().strip()}
             with open(os.path.join(_exe_dir, 'sr_gui.ini'), 'w', encoding='utf-8') as f:
                 _c2.write(f)
         except Exception:
@@ -318,7 +351,9 @@ class App:
                                     sharpen=sharpen,
                                     threads=threads,
                                     master_scale=master,
-                                    output_dng=use_dng)
+                                    output_dng=use_dng,
+                                    rl_sharpen=rl,
+                                    k14_backend=(k14 if use_k14 else None))
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:

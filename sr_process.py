@@ -17,7 +17,7 @@ import cv2
 import tifffile
 import rawpy
 
-from align import align_all_frames, align_frame, find_best_ref_frame
+from align import align_all_frames, align_frame, find_best_ref_frame, read_raw_as_gray
 from super_res import enhance_sharpness, denoise
 
 
@@ -142,9 +142,11 @@ def neutral_from_cam_mul(cam_mul):
 def read_raw_camera_linear(raw_path, half_size=False, use_camera_wb=False):
     """线性相机原生 RGB 解码（ColorSpace.raw、gamma=1，供 Linear DNG 融合）
 
-    libraw 的 scale_colors 即便在 raw 色彩空间也会把 WB 乘数烙进数据——
-    use_camera_wb=True 时烙 as-shot 乘数，False 时烙 daylight 乘数；
-    两种解码的通道中位数比值即 AsShotNeutral（见 measure_as_shot_neutral）。
+    use_camera_wb=False（融合数据域）时 libraw 会把 daylight 乘数烙进数据——
+    除回去得到相机原生域（undo = max(day)/day，仅 nocam 分支）：DNG 母版存
+    原生域，AsShotNeutral=1/cam_mul 才落在 LR 色温滑块中段（烙 daylight 时
+    标签被顶到 2250K、贴近滑块下限）。undo 与 libraw 实际烙入量在 B 通道有
+    ~4% 级偏差，由 AsShotNeutral 的实测链路（measure_as_shot_neutral）吸收。
     """
     import rawpy
     raw = rawpy.imread(str(raw_path))
@@ -159,40 +161,25 @@ def read_raw_camera_linear(raw_path, half_size=False, use_camera_wb=False):
             no_auto_bright=True,
             gamma=(1, 1),
         )
-        return rgb.astype(np.float32) / 65535.0
+        rgb = rgb.astype(np.float32) / 65535.0
+        if not use_camera_wb:
+            day = np.asarray(raw.daylight_whitebalance[:3], np.float32)
+            if day.shape == (3,) and np.isfinite(day).all() and day.min() > 0:
+                rgb = rgb * (day.max() / day)
+            rgb = np.clip(rgb, 0.0, 1.0)
+        return rgb
     finally:
         raw.close()
-
-
-def as_shot_neutral_from_metadata(raw_path):
-    """从 RAW 元数据直读 AsShotNeutral：daylight 乘数 / as-shot 乘数（各自按 G 归一）
-
-    管线把 libraw 的 daylight 乘数烙进融合数据（use_camera_wb=False），数据里
-    灰色 ∝ day/cam，故 AsShotNeutral = day/cam——与双解码实测比值同源，但
-    确定性、零解码成本、不依赖场景内容（夜景中位数会被暗部/黑电平差带偏）。
-    rawpy 无 daylight_whitebalance 或数值异常时返回 None（回退实测）。
-    """
-    try:
-        import rawpy
-        with rawpy.imread(str(raw_path)) as raw:
-            day = [float(v) for v in list(raw.daylight_whitebalance)[:3]]
-            cam = [float(v) for v in list(raw.camera_whitebalance)[:3]]
-        if len(day) < 3 or len(cam) < 3 or min(day) <= 0 or min(cam) <= 0:
-            return None
-        return [float(np.clip((d / day[1]) / (c / cam[1]), 0.25, 4.0))
-                for d, c in zip(day, cam)]
-    except Exception:
-        return None
 
 
 def measure_as_shot_neutral(ref_path):
     """实测 AsShotNeutral：同帧两种 WB 解码的通道中位数比值（nocam/cam）
 
-    融合数据烙 daylight 乘数 p（use_camera_wb=False），数据里灰色 ∝ p/cam_mul，
-    AsShotNeutral = median(nocam)/median(cam)——即让 as-shot 场景恢复中性的
-    乘数（LR 施加其倒数作增益）。**注意是 nocam 在分子**：此前写成 cam/nocam
-    导致标签整组取倒，LR 渲染强偏黄、色温滑块被顶到极端（2026-10-16 实测）。
-    连 libraw 内部归一化细节一起消掉；异常返回 None（回退元数据换算）。
+    nocam 分支已除回 daylight 烙印（原生域），其灰色 ∝ 1/cam_mul，
+    故 AsShotNeutral = median(nocam)/median(cam) ≈ 1/cam_mul（Kelvin 落中段）。
+    **注意是 nocam 在分子**：此前写成 cam/nocam 导致标签整组取倒，LR 渲染
+    强偏黄、色温滑块被顶到极端（2026-10-16 实测）。
+    连 libraw 内部归一化细节一起消掉；异常返回 None（回退 1/cam_mul 换算）。
     """
     try:
         nocam = read_raw_camera_linear(ref_path, half_size=True, use_camera_wb=False)
@@ -200,8 +187,9 @@ def measure_as_shot_neutral(ref_path):
         mn = np.median(nocam.reshape(-1, 3), axis=0)
         mc = np.median(cam.reshape(-1, 3), axis=0)
         ratio = mn / np.maximum(mc, 1e-6)
-        if not np.isfinite(ratio).all():
+        if not np.isfinite(ratio).all() or ratio[1] <= 0:
             return None
+        ratio = ratio / ratio[1]   # Adobe 惯例 G=1（量纲只取比值，LR 内部亦归一）
         return [float(np.clip(v, 0.25, 4.0)) for v in ratio]
     except Exception:
         return None
@@ -243,6 +231,11 @@ def derive_camera_to_srgb(ref_path):
                       output_bps=16, no_auto_bright=True, gamma=(1, 1))
             N = raw.postprocess(use_camera_wb=False, output_color=rawpy.ColorSpace.raw,
                                 **kw).astype(np.float64) / 65535.0
+            # nocam 分支与 read_raw_camera_linear 一致：除回 daylight 烙印（原生域），
+            # 否则回归出的仿射与融合数据（已 undo）不匹配
+            day = np.asarray(raw.daylight_whitebalance[:3], np.float64)
+            if day.shape == (3,) and np.isfinite(day).all() and day.min() > 0:
+                N = np.clip(N * (day.max() / day), 0.0, 1.0)
             L = raw.postprocess(use_camera_wb=True, output_color=rawpy.ColorSpace.sRGB,
                                 **kw).astype(np.float64) / 65535.0
         n, l = N.reshape(-1, 3), L.reshape(-1, 3)
@@ -258,22 +251,58 @@ def derive_camera_to_srgb(ref_path):
         return None
 
 
-def render_srgb_preview(linear_nocam, cam_to_srgb):
-    """融合后的 nocam 域线性数据 -> 线性sRGB（实测仿射）-> 2.2 幂 -> 逐通道拉伸
+def rl_deconvolve_u16(arr_u16, iterations=12, sigma=1.0, tile=1024, halo=48):
+    """Richardson-Lucy 反卷积（高斯 PSF），分块流式，uint16 进出
 
-    观感约定与旧 sRGB TIF 管线一致（gamma 2.2 + 逐通道 0.5-99.5 拉伸），
-    便于与旧输出口径对比；母版 DNG 保持线性原样，调色留给 LR。
+    JPG/预览的可选锐化：反卷积恢复单帧共有的光学+手持模糊（对齐/选帧都无法
+    修复的分量），锐度可到 SRHQ v2.5 水平。母版 DNG 保持线性原样——锐化是
+    渲染观感，不进 raw 数据。分块+halo：97MP 全幅三次浮点副本会吃 4GB+，
+    流式后峰值 <300MB；halo 远大于 3σ，核心区无边界伪迹。
+    """
+    obs = arr_u16.astype(np.float32) / 65535.0
+    est = obs.copy()
+    h, w = est.shape[:2]
+    eps = 1e-4
+    for _ in range(iterations):
+        prev = est
+        est = np.empty_like(est)
+        for y0 in range(0, h, tile):
+            for x0 in range(0, w, tile):
+                y1, x1 = min(y0 + tile, h), min(x0 + tile, w)
+                ya, yb = max(0, y0 - halo), min(h, y1 + halo)
+                xa, xb = max(0, x0 - halo), min(w, x1 + halo)
+                e = prev[ya:yb, xa:xb]
+                o = obs[ya:yb, xa:xb]
+                dist = cv2.GaussianBlur(e, (0, 0), sigma)
+                ratio = o / np.maximum(dist, eps)
+                corr = cv2.GaussianBlur(ratio, (0, 0), sigma)
+                est[y0:y1, x0:x1] = np.clip(
+                    e[y0-ya:y1-ya, x0-xa:x1-xa] * corr[y0-ya:y1-ya, x0-xa:x1-xa],
+                    0.0, 1.0)
+        del prev
+        gc.collect()
+    return (est * 65535.0 + 0.5).astype(np.uint16)
+
+
+def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
+    """融合后的 nocam 域线性数据 -> 线性sRGB（实测仿射）-> 2.2 幂 ->（可选）逐通道拉伸
+
+    stretch=True（默认）：旧 sRGB TIF 管线观感口径（gamma 2.2 + 0.5-99.5 拉伸），
+    独立 JPG 预览用，暗场提亮。
+    stretch=False：LR 默认渲染口径（只 gamma 不拉伸）——DNG 内嵌预览用。
+    Windows 图片看的是内嵌预览，拉伸版会和 LR 的 raw 渲染明显不一致（实测）。
     cam_to_srgb 为 derive_camera_to_srgb 返回的 (A, b)。
     """
     A, b = cam_to_srgb
     srgb = np.clip(linear_nocam.astype(np.float64) @ np.asarray(A, np.float64).T
                    + np.asarray(b, np.float64), 0, 1)
     out = np.power(srgb, 1.0 / 2.2)
-    out = out.copy()
-    for c in range(3):
-        ch = out[:, :, c]
-        lo, hi = np.percentile(ch, 0.5), np.percentile(ch, 99.5)
-        out[:, :, c] = np.clip((ch - lo) / (hi - lo + 1e-8), 0, 1)
+    if stretch:
+        # 亮度单增益拉伸：从亮度百分位算统一 offset+gain，三通道共用。
+        # 不能逐通道拉伸——各通道直方图不同，会掰歪色度（实测近距组白墙发绿）
+        luma = out[:, :, 0] * 0.2126 + out[:, :, 1] * 0.7152 + out[:, :, 2] * 0.0722
+        lo, hi = np.percentile(luma, 0.5), np.percentile(luma, 99.5)
+        out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
     return (out * 255 + 0.5).astype(np.uint8)
 
 
@@ -477,7 +506,8 @@ def _refine_euclidean(ref_half, frm_half, dx_full, dy_full, crop_ratio=0.55):
     return warp, fx0, fy0, x0, y0
 
 
-def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False):
+def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False,
+              blur_gate=True):
     """
     超分辨率重建 v2：SR 网格直接融合
 
@@ -515,6 +545,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     biases = np.zeros(n, dtype=np.float32)
     affines = [np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32) for _ in range(n)]
     motion_frac = np.zeros(n, dtype=np.float32)
+    blur_rms = np.full(n, np.nan, dtype=np.float32)
     max_rot = 0.0
     for i in range(n):
         if i == ref_idx:
@@ -561,9 +592,16 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
         valid = aligned >= 0
         diff = np.abs(aligned - ref_half)
         motion_frac[i] = float(((diff > 0.06) & valid).sum() / max(valid.sum(), 1))
+        # 模糊残差 RMS：对齐+光度校正后仍剩的残差能量。手抖糊掉的帧高频丢失，
+        # 对齐救不回来 -> RMS 显著高于清晰帧（参照 SRHQ 的 RMS 门限思路）。
+        # 光度校正后计算，避免曝光差被误判为模糊。
+        if valid.sum() > 100:
+            aligned_corr = np.clip(aligned * float(gains[i]) + float(biases[i]), 0, 1)
+            resid = (aligned_corr - ref_half)[valid]
+            blur_rms[i] = float(np.sqrt(np.mean(resid ** 2)))
         print(f"  精修 {raw_files[i].name}: dx={A[0, 2]:+8.2f} dy={A[1, 2]:+8.2f} "
               f"旋转={rot:+7.3f}° 增益={gains[i]:.4f} 偏置={biases[i]:+.4f} "
-              f"运动占比={motion_frac[i]:.1%}")
+              f"运动占比={motion_frac[i]:.1%} 模糊RMS={blur_rms[i]:.4f}")
         del fg, fg_half
     del ref_gray, ref_half
     gc.collect()
@@ -574,6 +612,26 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     for i in range(n):
         if motion_frac[i] > 0.15:
             print(f"  [剔除] {raw_files[i].name}: 运动占比 {motion_frac[i]:.1%}，内容大幅移动")
+    # 模糊 RMS 门限: 中位数×1.2 以上的帧整帧剔除（手抖糊帧，对齐无法修复）。
+    # 中位数在"运动剔除后的可用帧"上取（参考帧 RMS=0 会拉低中位数）；门限剔除后
+    # 若不足 4 帧（合成门槛），按 RMS 从低到高回补至 4 帧。
+    rms_pool = [i for i in usable if i != ref_idx and np.isfinite(blur_rms[i])
+                and blur_rms[i] > 0]
+    if blur_gate and len(rms_pool) >= 3:
+        rms_median = float(np.median([blur_rms[i] for i in rms_pool]))
+        rms_limit = rms_median * 1.2
+        gated = [i for i in usable if not (
+            i != ref_idx and np.isfinite(blur_rms[i]) and blur_rms[i] > rms_limit)]
+        dropped = [i for i in usable if i not in set(gated)]
+        if len(gated) < 4:
+            kept_sorted = sorted(rms_pool, key=lambda i: blur_rms[i])
+            gated = gated + [i for i in kept_sorted if i not in set(gated)][:4 - len(gated)]
+            gated.sort()
+        for i in dropped:
+            if i not in set(gated):
+                print(f"  [剔除] {raw_files[i].name}: 模糊RMS {blur_rms[i]:.4f} > "
+                      f"门限 {rms_limit:.4f}（中位 {rms_median:.4f}×1.2），单帧抖糊")
+        usable = sorted(set(gated))
     min_need = 4
     if len(usable) < min_need:
         raise ValueError(
@@ -742,9 +800,82 @@ def reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost):
     return sr_result, (w, h)
 
 
+# ===== Jiangtherapee Fast K14 外挂引擎（闭源，仅本机授权使用；商用/分发前须确认许可）=====
+
+K14_MAX_FRAMES = 14          # K14 = 14 帧神经融合
+K14_READ_NOISE_DEFAULT = 2.6 # e⁻，Z6 ISO800 量级（Z6 不在其 PTC 表，满阱用其默认 20000）
+
+
+def run_k14_engine(backend_exe, frame_paths, ref_path, out_dir, out_prefix='k14',
+                   black=1008, read_noise=K14_READ_NOISE_DEFAULT, fullwell=20000,
+                   timeout=1200):
+    """调用 Jiangtherapee Bridge 的 jsr_fast_k14_backend.exe（WGPU 神经重建）
+
+    CLI 坑（2.3.27 实测）：--inputs 是 **JSON 数组文件**（read_text 后 json.loads）；
+    --reference 是帧索引（int）；DNG 导出强制 LibRaw 矩阵（勿传 camera-model/
+    profile-source）；必须显式喂 --black/--read-noise/--fullwell。
+    black=None 时从参考帧 rawpy 元数据自动取。返回 (dng_path 或 None, 耗时秒)。
+    """
+    import json
+    import subprocess
+    import time
+    import uuid
+    frame_paths = [Path(p) for p in frame_paths]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if black is None:
+        import rawpy
+        with rawpy.imread(str(ref_path)) as raw:
+            black = int(np.median(np.asarray(raw.black_level_per_channel, np.float64)))
+    lst = out_dir / f'_k14_inputs_{uuid.uuid4().hex[:8]}.json'
+    lst.write_text(json.dumps([str(p) for p in frame_paths]), encoding='utf-8')
+    cmd = [str(backend_exe),
+           '--inputs', str(lst),
+           '--reference', str(frame_paths.index(Path(ref_path))),
+           '--black', str(int(black)),
+           '--read-noise', str(float(read_noise)),
+           '--fullwell', str(float(fullwell)),
+           '--output-dir', str(out_dir),
+           '--out-prefix', out_prefix,
+           '--out-dng', 'on', '--out-format', 'jpeg', '--jpeg-quality', '95']
+    t0 = time.time()
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                           cwd=str(Path(backend_exe).parent))
+        if r.returncode != 0:
+            print(f"  [K14] 后端退出码 {r.returncode}:")
+            print("  [K14][out] " + r.stdout.decode("utf-8", "replace")[-1500:])
+            print("  [K14][err] " + r.stderr.decode("utf-8", "replace")[-800:])
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  [K14] 调用失败: {e}")
+        return None, time.time() - t0
+    finally:
+        lst.unlink(missing_ok=True)
+    dng = out_dir / f'{out_prefix}.dng'
+    meta_path = out_dir / 'RESULT.json'
+    ok = dng.exists()
+    try:
+        ok = ok and json.loads(meta_path.read_text(encoding='utf-8')).get('status') == 'COMPLETE'
+    except Exception:
+        pass
+    return (dng if ok else None), time.time() - t0
+
+
+def load_subifd_rgb(dng_path):
+    """读 Adobe 结构 DNG 的 SubIFD（LinearRaw）为 RGB u16（tifffile 官方通道，
+    兼容无损 JPEG 压缩的 SubIFD——手写瓦片解析器不支持压缩）"""
+    import tifffile
+    tf = tifffile.TiffFile(str(dng_path))
+    for s in tf.series:
+        if s.shape[0] > 1000 and s.dtype == np.uint16:   # 主 raw 序列
+            return s.asarray()
+    raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
+
+
 def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
-            use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None):
+            use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
+            rl_sharpen=True, blur_gate=True, k14_backend=None):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
@@ -785,6 +916,7 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
 
     # 选择最佳帧
     print(f"\n[2/4] 选择最佳 {max_frames} 帧...")
+    all_frames = list(raw_files)          # K14 等外挂引擎可能需要从全组补帧
     selected_indices, raw_files, shifts, ref_idx = select_best_frames(
         raw_files, shifts, ref_idx, max_frames, max_shift
     )
@@ -804,15 +936,62 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         if all(Path(str(f)).suffix.lower() in RAW_EXTS for f in raw_files):
             dng_meta = extract_dng_metadata(raw_files[ref_idx])
             if dng_meta:
-                # 元数据直读优先（确定性零成本）；缺 daylight_whitebalance 时实测
-                as_shot_neutral = as_shot_neutral_from_metadata(raw_files[ref_idx])
-                if as_shot_neutral is None:
-                    as_shot_neutral = measure_as_shot_neutral(raw_files[ref_idx])
+                # 实测优先（与存储数据自洽：nocam 已除回 daylight，实测≈1/cam_mul）
+                as_shot_neutral = measure_as_shot_neutral(raw_files[ref_idx])
                 if as_shot_neutral is None:
                     import rawpy as _rp
                     with _rp.imread(str(raw_files[ref_idx])) as _raw:
                         as_shot_neutral = neutral_from_cam_mul(_raw.camera_whitebalance)
                 use_dng = as_shot_neutral is not None
+    if k14_backend and use_dng and scale == 2:
+        # ===== K14 外挂引擎流程：分组/选帧/EXIF/交付归我们，对齐重建交给 K14 =====
+        import shutil as _shutil
+        base = str(output_path).rsplit('.', 1)[0]
+        ref_frame = raw_files[ref_idx]
+        # K14 恰好吃 14 帧：从全组按高频能量（清晰度）排序取前 14，参考帧强制保留。
+        # 内置选帧滤掉的大位移帧也参与排名——K14 自带对齐（Fast 大位移），给它们机会。
+        scored = []
+        for f in all_frames:
+            g = read_raw_as_gray(f, half_size=True)
+            scored.append((float((g - cv2.GaussianBlur(g, (0, 0), 2.0)).std()), f))
+        scored.sort(key=lambda x: -x[0])
+        frames14 = [f for _, f in scored[:K14_MAX_FRAMES]]
+        if ref_frame not in frames14:
+            frames14[-1] = ref_frame
+        print(f"\n[3/4] K14 外挂引擎（{len(frames14)} 帧, 参考 {ref_frame.name}）...")
+        work = Path(base + '_k14work')
+        dng14, secs = run_k14_engine(k14_backend, frames14, ref_frame, work)
+        if dng14 is None:
+            raise RuntimeError("K14 引擎失败（见上方日志；确认 Bridge resources 目录与显卡 WGPU 可用）")
+        final = base + '_2x.dng'
+        _shutil.move(str(dng14), final)
+        big = load_subifd_rgb(final)
+        out_h, out_w = big.shape[:2]
+        if copy_exif_from_frame(et, ref_frame, final, width=out_w, height=out_h):
+            print(f"  DNG:  {final} ({Path(final).stat().st_size/(1024*1024):.0f}MB, K14 线性 DNG, 完整EXIF已继承)")
+        else:
+            print(f"  DNG:  {final} ({Path(final).stat().st_size/(1024*1024):.0f}MB, K14 线性 DNG)")
+        transform = derive_camera_to_srgb(ref_frame)
+        if transform is None:
+            transform = (np.eye(3), np.zeros(3))
+        jpg_path = base + f'_{scale}x.jpg'
+        print("  JPG:  RL 反卷积锐化（12 iter, σ=1.0）...")
+        big_rl = rl_deconvolve_u16(big)
+        prev = render_srgb_preview(big_rl.astype(np.float32) / 65535.0, transform, stretch=True)
+        del big, big_rl
+        ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(prev, cv2.COLOR_RGB2BGR),
+                                   [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if ok:
+            Path(jpg_path).write_bytes(jpg_buf.tobytes())
+            copy_exif_from_frame(et, ref_frame, jpg_path, width=out_w, height=out_h)
+        print(f"  JPG:  {jpg_path} ({Path(jpg_path).stat().st_size/(1024*1024):.1f}MB, sRGB 预览)")
+        _shutil.rmtree(work, ignore_errors=True)
+        elapsed = time.time() - t0
+        print(f"\n{'=' * 60}")
+        print(f"完成！ {len(frames14)} 帧 K14 外挂引擎（内核耗时 {secs:.0f} 秒）")
+        print(f"耗时: {elapsed:.1f} 秒")
+        return
+
     if output_dng and not use_dng and not use_legacy:
         print("  提示: DNG 母版不可用（JPG 组 / 缺 ExifTool / 元数据异常），输出 sRGB TIF")
 
@@ -824,7 +1003,7 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         sr_result, (orig_w, orig_h) = reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost)
     else:
         sr_result, (orig_w, orig_h) = reconstruct(raw_files, shifts, ref_idx, scale, use_deghost,
-                                                  tile, camera_linear=use_dng)
+                                                  tile, camera_linear=use_dng, blur_gate=blur_gate)
 
     base = str(output_path).rsplit('.', 1)[0]
     ref_frame = raw_files[ref_idx]
@@ -834,16 +1013,17 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         print("\n[4/4] 输出 Linear DNG 母版（线性数据，调色/降噪/锐化全部留给 LR）...")
         out_h, out_w = sr_result.shape[:2]
         arr_u16 = (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)
-        # 预览先渲染（同帧实测仿射 nocam->线性sRGB，观感与旧 sRGB 管线同口径），
-        # 同一张既烙进 DNG 的 IFD0（LR 导入即显）又存成 JPG
+        # 预览先渲染（同帧实测仿射 nocam->线性sRGB，含 as-shot WB）：DNG 内嵌
+        # LR 默认渲染口径（不拉伸，Windows 图片看内嵌预览才不会与 LR 色彩不一致）；
+        # JPG 用旧管观感口径（拉伸提亮，独立交付物）
         transform = derive_camera_to_srgb(ref_frame)
         if transform is None:
             transform = (np.eye(3), np.zeros(3))  # 极端兜底（仅观感退化，不阻断输出）
-        preview = render_srgb_preview(sr_result, transform)
+        preview_master = render_srgb_preview(sr_result, transform, stretch=False)
         dng_path = base + f'_{scale}x.dng'
         if not write_linear_dng(dng_path, arr_u16, dng_meta['matrix'], as_shot_neutral,
                                 dng_meta['model'], et,
-                                preview_rgb=preview, orig_raw_name=ref_frame.name):
+                                preview_rgb=preview_master, orig_raw_name=ref_frame.name):
             raise RuntimeError(f"DNG 写入失败: {dng_path}")
         dng_mb = Path(dng_path).stat().st_size / (1024*1024)
         if copy_exif_from_frame(et, ref_frame, dng_path, width=out_w, height=out_h):
@@ -852,6 +1032,13 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版)")
 
         jpg_path = base + f'_{scale}x.jpg'
+        if rl_sharpen:
+            print("  JPG:  RL 反卷积锐化（12 iter, σ=1.0）...")
+            preview_jpg_src = rl_deconvolve_u16(
+                (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)).astype(np.float32) / 65535.0
+        else:
+            preview_jpg_src = sr_result
+        preview = render_srgb_preview(preview_jpg_src, transform, stretch=True)
         ok, jpg_buf = cv2.imencode('.jpg', cv2.cvtColor(preview, cv2.COLOR_RGB2BGR),
                                    [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:
@@ -1015,11 +1202,17 @@ def main():
     parser.add_argument("--denoise", action="store_true", help="启用降噪")
     parser.add_argument("--legacy", action="store_true", help="使用旧版算法（对齐回参考帧再放大）")
     parser.add_argument("--tile", type=int, default=1024, help="融合分块大小（像素）")
+    parser.add_argument("--no-rl-sharpen", action="store_true", help="关闭 JPG 的 RL 反卷积锐化")
+    parser.add_argument("--no-blur-gate", action="store_true", help="关闭模糊 RMS 选帧门限")
+    parser.add_argument("--k14-backend", default=None,
+                        help="Jiangtherapee Fast K14 后端 exe 路径（外挂引擎，2x 专用）")
 
     args = parser.parse_args()
     process(
         args.input, args.output, args.scale, args.max_frames, args.max_shift,
-        not args.no_deghost, args.sharpen, args.denoise, 5, args.legacy, args.tile
+        not args.no_deghost, args.sharpen, args.denoise, 5, args.legacy, args.tile,
+        rl_sharpen=not args.no_rl_sharpen, blur_gate=not args.no_blur_gate,
+        k14_backend=args.k14_backend
     )
 
 

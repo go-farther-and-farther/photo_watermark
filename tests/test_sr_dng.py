@@ -188,30 +188,22 @@ class TestRealNefMetadata:
 
     @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
     def test_measure_as_shot_neutral(self):
-        """实测比值 = AsShotNeutral（nocam 在分子）：让 as-shot 场景恢复中性的乘数
+        """实测比值 = AsShotNeutral（nocam 已除回 daylight，原生域）：≈ 1/cam_mul
 
-        此前实现把分子分母写反（标签整组取倒），LR 渲染强偏黄、色温滑块顶到
-        2000K 极端（2026-10-16 实测）。暖光夜景（ISO4000 室内）：R 中性乘数应
-        大于 B（实测约 [1.28, 1.0, 0.74]）。
+        Z6 该帧 cam_mul=[1.578, 1, 1.576]（R≈B）-> AsShotNeutral≈[0.634, 1, 0.634]，
+        LR as-shot 色温落滑块中段（此前数据烙 daylight 时标签被顶到 2250K 贴下限）。
         """
         n = sr_process.measure_as_shot_neutral(Z6_NEF)
         assert n is not None and len(n) == 3
-        assert all(0.3 < v < 3.5 for v in n)
-        assert n[0] > n[2]
-
-    @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
-    def test_as_shot_neutral_from_metadata(self):
-        """元数据直读 day/cam：与双解码实测比值一致（交叉验证，差异 < 2%）"""
-        meta = sr_process.as_shot_neutral_from_metadata(Z6_NEF)
-        assert meta is not None and len(meta) == 3
-        assert meta[1] == pytest.approx(1.0, abs=1e-6)
-        # Z6 实测：day=[1.898, 0.937, 1.090] / cam=[1.578, 1, 1.576] -> 约 [1.28, 1, 0.74]
-        assert meta[0] == pytest.approx(1.284, abs=0.03)
-        assert meta[2] == pytest.approx(0.738, abs=0.03)
-        measured = sr_process.measure_as_shot_neutral(Z6_NEF)
-        assert measured is not None
-        for a, b in zip(meta, measured):
-            assert a == pytest.approx(b, rel=0.02)
+        assert all(0.3 < v < 2.0 for v in n)
+        assert n[0] == pytest.approx(n[2], abs=0.06)   # 相机 as-shot R≈B
+        assert n[0] == pytest.approx(0.634, abs=0.08)
+        # 与元数据换算 1/cam_mul 交叉验证（libraw 烙印 undo 的 B 通道残差 ~4%，放宽）
+        import rawpy
+        with rawpy.imread(str(Z6_NEF)) as raw:
+            ref = sr_process.neutral_from_cam_mul(raw.camera_whitebalance)
+        assert n[0] == pytest.approx(ref[0], rel=0.06)
+        assert n[2] == pytest.approx(ref[2], rel=0.06)
 
     @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
     def test_read_raw_camera_linear_is_linear(self):

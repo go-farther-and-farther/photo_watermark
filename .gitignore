@@ -71,3 +71,7 @@ devtests/layout_shot.png
 
 # 超分窗口的线程数配置（运行时自动生成，不入库）
 sr_gui.ini
+
+# SR 工具构建与调试产物
+devtests/res_report/
+devtests/_dngdbg/
