@@ -115,6 +115,12 @@ class App:
         self._btn_k14.pack(side='left', padx=2)
         if self.var_k14.get():
             self._btn_k14.configure(text='K14后端✓')
+        # K14 路线借鉴项：单应 ECC 精修（补透视项，残差不降 2% 自动退回欧氏）
+        # + 实测残差融合加权（锐帧多信、糊帧少信）
+        self.var_homo = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f3b, text='单应对齐(透视精修)', variable=self.var_homo).pack(side='left', padx=(14, 2))
+        self.var_nwt = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f3b, text='噪声加权(锐帧多信)', variable=self.var_nwt).pack(side='left', padx=(14, 2))
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
         ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)
@@ -306,6 +312,8 @@ class App:
         threads = self.var_threads.get()
         keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
+        homo = self.var_homo.get()
+        nwt = self.var_nwt.get()
         use_k14 = self.var_engine14.get()
         k14 = self.var_k14.get().strip() or None
         if use_k14 and not k14:
@@ -353,7 +361,9 @@ class App:
                                     master_scale=master,
                                     output_dng=use_dng,
                                     rl_sharpen=rl,
-                                    k14_backend=(k14 if use_k14 else None))
+                                    k14_backend=(k14 if use_k14 else None),
+                                    use_homography=homo,
+                                    use_noise_weight=nwt)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:

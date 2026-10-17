@@ -506,8 +506,129 @@ def _refine_euclidean(ref_half, frm_half, dx_full, dy_full, crop_ratio=0.55):
     return warp, fx0, fy0, x0, y0
 
 
+def _affine_coords(A, SX, SY):
+    """仿射 warp 的目标坐标（cv2.remap 口径：输出坐标 -> 输入坐标）"""
+    return (A[0, 0] * SX + A[0, 1] * SY + A[0, 2],
+            A[1, 0] * SX + A[1, 1] * SY + A[1, 2])
+
+
+def _proj_coords(H, SX, SY):
+    """射影 warp 的目标坐标：坐标除以齐次项（设计上与 _affine_coords 同方向）"""
+    d = H[2, 0] * SX + H[2, 1] * SY + H[2, 2]
+    return ((H[0, 0] * SX + H[0, 1] * SY + H[0, 2]) / d,
+            (H[1, 0] * SX + H[1, 1] * SY + H[1, 2]) / d)
+
+
+def _persp_disp(H, hw):
+    """H 与去透视仿射对四角投影的最大位移（px，H 归一化 h22=1 后衡量）"""
+    h, w = hw
+    H = np.asarray(H, dtype=np.float64) / H[2, 2]
+    corners = np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], dtype=np.float64).T
+    p = H @ corners
+    pa = np.vstack([H[:2], [0.0, 0.0, 1.0]]) @ corners
+    return float(np.max(np.linalg.norm(p[:2] / p[2] - pa[:2] / pa[2], axis=0)))
+
+
+def _homography_ok(H, hw):
+    """全尺寸 3×3 warp 解析门控，返回 (ok, 原因)。
+
+    ECC 只允许解出小残差：旋转/平移与欧氏门控同口径（换算全尺寸），
+    透视项用四角投影位移衡量（去透视仿射作对照）。
+    """
+    h, w = hw
+    H = H / H[2, 2]
+    M = H[:2, :2]
+    det = float(np.linalg.det(M))
+    if det <= 0:
+        return False, f'翻转(det={det:.3f})'
+    rot = abs(np.degrees(np.arctan2(float(M[1, 0]), float(M[0, 0]))))
+    if rot > 0.5:
+        return False, f'旋转 {rot:.2f}°>0.5°'
+    if abs(float(H[0, 2])) > 60 or abs(float(H[1, 2])) > 60:
+        return False, f'平移 ({H[0, 2]:.1f},{H[1, 2]:.1f})>60px'
+    s = np.linalg.svd(M, compute_uv=False)
+    if not (0.97 <= float(s[0]) <= 1.03 and 0.97 <= float(s[1]) <= 1.03):
+        return False, f'缩放异常(奇异值 {s[0]:.3f},{s[1]:.3f})'
+    disp = _persp_disp(H, (h, w))
+    if disp > 0.005 * min(w, h):
+        return False, f'透视位移 {disp:.1f}px 超限'
+    return True, f'透视 {disp:.2f}px'
+
+
+def _refine_homography(ref_half, frm_half, dx_full, dy_full, crop_ratio=0.55):
+    """半尺寸 ECC 单应精修（平移+旋转+透视）
+
+    欧氏解留不住的透视项（手持绕非光心转动、连拍间 rolling shutter 差异）
+    在同一窗口、同一预对齐口径下补齐。窗口提取与 _refine_euclidean 完全一致。
+    返回 (H 3x3 float64: ref半尺寸crop -> frm半尺寸crop, fx0, fy0, x0h, y0h)。
+    """
+    h, w = ref_half.shape
+    dx, dy = dx_full / 2.0, dy_full / 2.0
+    cc, cw = int(h * crop_ratio), int(w * crop_ratio)
+    y0, x0 = (h - cc) // 2, (w - cw) // 2
+    ix, iy = int(round(dx)), int(round(dy))
+    fy0 = int(np.clip(y0 + iy, 0, h - cc))
+    fx0 = int(np.clip(x0 + ix, 0, w - cw))
+    ref_c = ref_half[y0:y0 + cc, x0:x0 + cw]
+    frm_c = frm_half[fy0:fy0 + cc, fx0:fx0 + cw]
+    warp = np.array([[1.0, 0.0, dx - ix],
+                     [0.0, 1.0, dy - iy],
+                     [0.0, 0.0, 1.0]], dtype=np.float32)
+    _, warp = cv2.findTransformECC(ref_c, frm_c, warp, cv2.MOTION_HOMOGRAPHY,
+                                   (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-6),
+                                   None, 3)
+    return warp.astype(np.float64), fx0, fy0, x0, y0
+
+
+def _noise_weights(blur_rms, usable, ref_idx):
+    """实测残差定权：w = 1/(rms² + floor)，floor = usable 帧 rms² 的中位数。
+
+    相对中位归一后截断到 [0.5, 2]：锐利帧不独大、模糊帧不丢剔（剔除由
+    RMS 门限负责，加权只是软修正）。残差缺失的帧权重 1，参考帧取其余帧中位。
+    返回 (usable 顺序的权重数组, 参考帧权重)。
+    """
+    rms = np.array([blur_rms[i] for i in usable], dtype=np.float64)
+    fin = np.isfinite(rms)
+    if not fin.any():
+        return np.ones(len(usable), dtype=np.float32), 1.0
+    r2 = rms[fin] ** 2
+    floor = float(np.median(r2))
+    w = np.ones(len(usable), dtype=np.float64)
+    w[fin] = 1.0 / (r2 + floor)
+    med = float(np.median(w[fin]))
+    w[fin] = np.clip(w[fin] / med, 0.5, 2.0)
+    w_ref = float(np.median(w))
+    return w.astype(np.float32), w_ref
+
+
+def _align_stats(ref_half, frm_half, P, gain=1.0, bias=0.0):
+    """半尺寸对齐质量：内容运动占比 + 模糊残差 RMS（射影 P，ref->frame）。
+
+    remap 边界填 -1 生成 valid 掩码；RMS 在光度校正后计算，
+    避免曝光差被误判为模糊。仿射 P 的齐次项恒为 1.0，除法逐位无损。
+    """
+    h, w = ref_half.shape
+    xs = np.arange(w, dtype=np.float32)
+    ys = np.arange(h, dtype=np.float32)
+    P32 = np.asarray(P, dtype=np.float32)
+    d = P32[2, 0] * xs[None, :] + P32[2, 1] * ys[:, None] + P32[2, 2]
+    map_x = (P32[0, 0] * xs[None, :] + P32[0, 1] * ys[:, None] + P32[0, 2]) / d
+    map_y = (P32[1, 0] * xs[None, :] + P32[1, 1] * ys[:, None] + P32[1, 2]) / d
+    aligned = cv2.remap(frm_half, map_x, map_y, interpolation=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=-1.0)
+    valid = aligned >= 0
+    diff = np.abs(aligned - ref_half)
+    mf = float(((diff > 0.06) & valid).sum() / max(valid.sum(), 1))
+    rms = np.nan
+    if valid.sum() > 100:
+        aligned_corr = np.clip(aligned * float(gain) + float(bias), 0, 1)
+        resid = (aligned_corr - ref_half)[valid]
+        rms = float(np.sqrt(np.mean(resid ** 2)))
+    return mf, rms
+
+
 def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False,
-              blur_gate=True):
+              blur_gate=True, use_homography=True, use_noise_weight=True):
     """
     超分辨率重建 v2：SR 网格直接融合
 
@@ -521,6 +642,9 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
          落在超分网格的不同亚相位上，融合才可能真正增加细节
       4. 分块鲁棒融合：以逐像素中位数为锚压低离群帧（运动/鬼影），
          替代旧版的高斯掩码
+      5. 对齐模型：相位相关 -> ECC 欧氏 -> ECC 单应（解析门控 + 残差验收，
+         不达标退回欧氏——任何情况都不差于纯欧氏）
+      6. 噪声感知加权：实测残差定权（锐帧多信、糊帧少信），截断 [0.5, 2]
 
     camera_linear=True 时帧按线性相机原生色彩空间解码（Linear DNG 用），
     融合结果保持线性、不做任何显示变换。
@@ -543,25 +667,29 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     ref_half = cv2.resize(ref_gray, (ref_gray.shape[1] // 2, ref_gray.shape[0] // 2))
     gains = np.ones(n, dtype=np.float32)
     biases = np.zeros(n, dtype=np.float32)
-    affines = [np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32) for _ in range(n)]
+    warps = [np.eye(3, dtype=np.float64) for _ in range(n)]   # ref->frame 全尺寸
+    proj = [False] * n                                        # 该帧是否含透视项
     motion_frac = np.zeros(n, dtype=np.float32)
     blur_rms = np.full(n, np.nan, dtype=np.float32)
     max_rot = 0.0
+    max_persp = 0.0
+    S2 = np.diag([2.0, 2.0, 1.0])
+    S2i = np.diag([0.5, 0.5, 1.0])
     for i in range(n):
         if i == ref_idx:
             continue
         fg = np.power(np.clip(np.mean(frames[i], axis=2, dtype=np.float32) / 65535.0, 0, 1), 1 / 2.2)
         shifts[i] = _refine_shift(ref_gray, fg, shifts[i])
         gains[i], biases[i] = _estimate_gain_bias(ref_gray, fg, shifts[i])
+        fg_half = cv2.resize(fg, (fg.shape[1] // 2, fg.shape[0] // 2))
         # ECC 欧氏精修（半尺寸）: 捕捉帧间旋转，纯平移模型下 0.2° = 边缘 ~15px 错位
-        A = np.array([[1.0, 0.0, shifts[i][0]], [0.0, 1.0, shifts[i][1]]], dtype=np.float32)
         rot = 0.0
-        # 半尺寸仿射（ref半尺寸坐标 -> frame半尺寸坐标），ECC 失败时退回纯平移
+        homo_msg = ''
+        # 半尺寸 warp（ref半尺寸坐标 -> frame半尺寸坐标），ECC 失败时退回纯平移
         Ph = np.array([[1.0, 0.0, shifts[i][0] / 2.0],
                        [0.0, 1.0, shifts[i][1] / 2.0],
                        [0.0, 0.0, 1.0]], dtype=np.float64)
         try:
-            fg_half = cv2.resize(fg, (fg.shape[1] // 2, fg.shape[0] // 2))
             E, fx0, fy0, x0h, y0h = _refine_euclidean(ref_half, fg_half, *shifts[i])
             rot_raw = float(np.degrees(np.arctan2(E[1, 0], E[0, 0])))
             if abs(rot_raw) > 0.5 or abs(E[0, 2]) > 30 or abs(E[1, 2]) > 30:
@@ -571,36 +699,44 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
             Th = np.array([[1, 0, fx0], [0, 1, fy0], [0, 0, 1]], dtype=np.float64)
             To = np.array([[1, 0, -x0h], [0, 1, -y0h], [0, 0, 1]], dtype=np.float64)
             Ph = Th @ E3 @ To                             # ref半尺寸坐标 -> frame半尺寸坐标
-            S2 = np.diag([2.0, 2.0, 1.0])
-            A3 = S2 @ Ph @ np.linalg.inv(S2)              # 半尺寸仿射 -> 全尺寸
-            A = A3[:2].astype(np.float32)
-            rot = float(np.degrees(np.arctan2(A[1, 0], A[0, 0])))
+            rot = float(np.degrees(np.arctan2(Ph[1, 0], Ph[0, 0])))
             max_rot = max(max_rot, abs(rot))
+            # 单应精修: 欧氏解之上补透视项（绕非光心转动/rolling shutter 差异）。
+            # 解析门控 + 残差验收双保险，任何分支都不差于欧氏解。
+            if use_homography:
+                try:
+                    Hc, hfx0, hfy0, hx0, hy0 = _refine_homography(ref_half, fg_half, *shifts[i])
+                    PH = (np.array([[1, 0, hfx0], [0, 1, hfy0], [0, 0, 1]], dtype=np.float64)
+                          @ Hc
+                          @ np.array([[1, 0, -hx0], [0, 1, -hy0], [0, 0, 1]], dtype=np.float64))
+                    okH, whyH = _homography_ok(S2 @ PH @ S2i, (h, w))
+                    if not okH:
+                        homo_msg = f'单应✗({whyH})'
+                        raise ValueError(whyH)
+                    PH = PH / PH[2, 2]
+                    rms_e = _align_stats(ref_half, fg_half, Ph, gains[i], biases[i])[1]
+                    rms_h = _align_stats(ref_half, fg_half, PH, gains[i], biases[i])[1]
+                    if np.isfinite(rms_h) and rms_h <= 0.98 * rms_e:
+                        Ph = PH
+                        rot = float(np.degrees(np.arctan2(Ph[1, 0], Ph[0, 0])))
+                        max_rot = max(max_rot, abs(rot))
+                        proj[i] = abs(Ph[2, 0]) > 1e-7 or abs(Ph[2, 1]) > 1e-7
+                        max_persp = max(max_persp, _persp_disp(S2 @ Ph @ S2i, (h, w)))
+                        homo_msg = f'单应✓(rms {rms_e:.4f}->{rms_h:.4f})'
+                    else:
+                        homo_msg = f'单应✗(rms {rms_e:.4f}->{rms_h:.4f})'
+                except (cv2.error, ValueError):
+                    pass  # 单应不收敛/被拒：保留欧氏解
         except (cv2.error, ValueError):
-            pass  # ECC 不收敛/解不合理时退回纯平移
-        affines[i] = A
-        # 内容运动检查: 对齐(平移+旋转)后仍大幅差异 = 人物/物体自身移动。
-        # 无论 ECC 成败都必须执行（用最终仿射 Ph），否则坏帧会漏检。
-        fg_half = cv2.resize(fg, (fg.shape[1] // 2, fg.shape[0] // 2))
-        xs = np.arange(ref_half.shape[1], dtype=np.float32)
-        ys = np.arange(ref_half.shape[0], dtype=np.float32)
-        P32 = Ph.astype(np.float32)
-        map_x = (P32[0, 0] * xs[None, :] + P32[0, 1] * ys[:, None] + P32[0, 2])
-        map_y = (P32[1, 0] * xs[None, :] + P32[1, 1] * ys[:, None] + P32[1, 2])
-        aligned = cv2.remap(fg_half, map_x, map_y, interpolation=cv2.INTER_LINEAR,
-                            borderMode=cv2.BORDER_CONSTANT, borderValue=-1.0)
-        valid = aligned >= 0
-        diff = np.abs(aligned - ref_half)
-        motion_frac[i] = float(((diff > 0.06) & valid).sum() / max(valid.sum(), 1))
-        # 模糊残差 RMS：对齐+光度校正后仍剩的残差能量。手抖糊掉的帧高频丢失，
-        # 对齐救不回来 -> RMS 显著高于清晰帧（参照 SRHQ 的 RMS 门限思路）。
-        # 光度校正后计算，避免曝光差被误判为模糊。
-        if valid.sum() > 100:
-            aligned_corr = np.clip(aligned * float(gains[i]) + float(biases[i]), 0, 1)
-            resid = (aligned_corr - ref_half)[valid]
-            blur_rms[i] = float(np.sqrt(np.mean(resid ** 2)))
-        print(f"  精修 {raw_files[i].name}: dx={A[0, 2]:+8.2f} dy={A[1, 2]:+8.2f} "
-              f"旋转={rot:+7.3f}° 增益={gains[i]:.4f} 偏置={biases[i]:+.4f} "
+            pass  # ECC 不收敛/解不合理时退回纯平移（单应随之跳过）
+        warps[i] = S2 @ Ph @ S2i                      # 半尺寸 -> 全尺寸
+        # 内容运动检查 + 模糊残差 RMS：对齐(含透视)后仍大幅差异 = 内容移动/抖糊。
+        # 无论各级 ECC 成败都必须执行（用最终 warp），否则坏帧会漏检。
+        motion_frac[i], blur_rms[i] = _align_stats(ref_half, fg_half, Ph,
+                                                   gains[i], biases[i])
+        extra = f' {homo_msg}' if homo_msg else ''
+        print(f"  精修 {raw_files[i].name}: dx={warps[i][0, 2]:+8.2f} dy={warps[i][1, 2]:+8.2f} "
+              f"旋转={rot:+7.3f}°{extra} 增益={gains[i]:.4f} 偏置={biases[i]:+.4f} "
               f"运动占比={motion_frac[i]:.1%} 模糊RMS={blur_rms[i]:.4f}")
         del fg, fg_half
     del ref_gray, ref_half
@@ -641,12 +777,26 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
         gc.collect()
     gains_u = gains[usable]
     biases_u = biases[usable]
+    # 噪声感知加权：实测残差定权（K14 显式噪声参数的等效实现，不需要机型噪声表）
+    w_us = None
+    if use_noise_weight and len(usable) >= 2:
+        w_arr, w_ref = _noise_weights(blur_rms, usable, ref_idx)
+        if np.any(w_arr != np.float32(1.0)) or w_ref != 1.0:
+            w_arr[list(usable).index(ref_idx)] = w_ref
+            w_us = w_arr
+            wtxt = ' '.join(f'{raw_files[i].stem}×{w:.2f}' for i, w in zip(usable, w_arr))
+            print(f"  噪声加权: {wtxt}")
 
-    # 重叠画布：场景点 s 需对每帧都满足 s + d ∈ [0, w)；旋转按内切矩形收缩画布
+    # 重叠画布：场景点 s 需对每帧都满足 s + d ∈ [0, w)；旋转按内切矩形收缩画布，
+    # 透视帧按角点位移留保守余量（上限 50px）
     min_dx, max_dx = min(s[0] for s in shifts), max(s[0] for s in shifts)
     min_dy, max_dy = min(s[1] for s in shifts), max(s[1] for s in shifts)
     rot_mx = int(np.ceil(np.tan(np.radians(max_rot)) * h / 2)) if max_rot > 0.05 else 0
     rot_my = int(np.ceil(np.tan(np.radians(max_rot)) * w / 2)) if max_rot > 0.05 else 0
+    if max_persp > 0.01:
+        per_m = min(int(np.ceil(max_persp)), 50)
+        rot_mx += per_m
+        rot_my += per_m
     crop_x0 = max(0, int(np.ceil(-min_dx))) + rot_mx
     crop_x1 = min(w, int(np.floor(w - max_dx))) - rot_mx
     crop_y0 = max(0, int(np.ceil(-min_dy))) + rot_my
@@ -667,6 +817,10 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
     sx_base = (np.arange(sr_w, dtype=np.float32) + 0.5) / scale - 0.5 + crop_x0
     sy_base = (np.arange(sr_h, dtype=np.float32) + 0.5) / scale - 0.5 + crop_y0
     robust = use_deghost and n >= 3
+    any_proj = any(proj[i] for i in usable)
+    if any_proj:
+        names = ','.join(raw_files[i].stem for i in usable if proj[i])
+        print(f"  透视warp生效帧: {names}")
     for ty in range(0, sr_h, tile):
         th = min(tile, sr_h - ty)
         for tx in range(0, sr_w, tile):
@@ -674,18 +828,29 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
             SX, SY = np.meshgrid(sx_base[tx:tx + tw], sy_base[ty:ty + th])
             S = np.empty((len(usable), th, tw, 3), dtype=np.float32)
             for j, i in enumerate(usable):
-                A = affines[i]
-                mx = (A[0, 0] * SX + A[0, 1] * SY + A[0, 2]).astype(np.float32)
-                my = (A[1, 0] * SX + A[1, 1] * SY + A[1, 2]).astype(np.float32)
-                S[j] = cv2.remap(frames[i], mx, my, interpolation=cv2.INTER_CUBIC,
-                                 borderMode=cv2.BORDER_REPLICATE)
+                if any_proj:
+                    mx, my = _proj_coords(warps[i], SX, SY)
+                    S[j] = cv2.remap(frames[i], mx.astype(np.float32), my.astype(np.float32),
+                                     interpolation=cv2.INTER_CUBIC,
+                                     borderMode=cv2.BORDER_REPLICATE)
+                else:
+                    # 纯平移/旋转组：仿射快路径，与单应引入前的输出逐位一致
+                    A = warps[i][:2].astype(np.float32)
+                    mx = (A[0, 0] * SX + A[0, 1] * SY + A[0, 2]).astype(np.float32)
+                    my = (A[1, 0] * SX + A[1, 1] * SY + A[1, 2]).astype(np.float32)
+                    S[j] = cv2.remap(frames[i], mx, my, interpolation=cv2.INTER_CUBIC,
+                                     borderMode=cv2.BORDER_REPLICATE)
             S -= biases_u[:, None, None, None]
             S *= gains_u[:, None, None, None]
             if robust:
                 med = np.median(S, axis=0)
                 rel = np.abs(S - med[None]).mean(axis=3) / (1310.0 + med.mean(axis=2))
                 wmat = 1.0 / (1.0 + (rel / 0.25) ** 2)
+                if w_us is not None:
+                    wmat = wmat * w_us[:, None, None]
                 val = (S * wmat[..., None]).sum(axis=0) / np.maximum(wmat.sum(axis=0), 1e-6)[..., None]
+            elif w_us is not None:
+                val = (S * w_us[:, None, None, None]).sum(axis=0) / float(w_us.sum())
             else:
                 val = S.mean(axis=0)
             out[ty:ty + th, tx:tx + tw] = np.clip(val + 0.5, 0, 65535).astype(np.uint16)
@@ -875,7 +1040,8 @@ def load_subifd_rgb(dng_path):
 def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
-            rl_sharpen=True, blur_gate=True, k14_backend=None):
+            rl_sharpen=True, blur_gate=True, k14_backend=None,
+            use_homography=True, use_noise_weight=True):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
@@ -1003,7 +1169,9 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         sr_result, (orig_w, orig_h) = reconstruct_legacy(raw_files, shifts, ref_idx, scale, use_deghost)
     else:
         sr_result, (orig_w, orig_h) = reconstruct(raw_files, shifts, ref_idx, scale, use_deghost,
-                                                  tile, camera_linear=use_dng, blur_gate=blur_gate)
+                                                  tile, camera_linear=use_dng, blur_gate=blur_gate,
+                                                  use_homography=use_homography,
+                                                  use_noise_weight=use_noise_weight)
 
     base = str(output_path).rsplit('.', 1)[0]
     ref_frame = raw_files[ref_idx]
@@ -1204,6 +1372,8 @@ def main():
     parser.add_argument("--tile", type=int, default=1024, help="融合分块大小（像素）")
     parser.add_argument("--no-rl-sharpen", action="store_true", help="关闭 JPG 的 RL 反卷积锐化")
     parser.add_argument("--no-blur-gate", action="store_true", help="关闭模糊 RMS 选帧门限")
+    parser.add_argument("--no-homography", action="store_true", help="关闭单应精修（退回欧氏对齐）")
+    parser.add_argument("--no-noise-weight", action="store_true", help="关闭噪声感知融合加权")
     parser.add_argument("--k14-backend", default=None,
                         help="Jiangtherapee Fast K14 后端 exe 路径（外挂引擎，2x 专用）")
 
@@ -1212,7 +1382,9 @@ def main():
         args.input, args.output, args.scale, args.max_frames, args.max_shift,
         not args.no_deghost, args.sharpen, args.denoise, 5, args.legacy, args.tile,
         rl_sharpen=not args.no_rl_sharpen, blur_gate=not args.no_blur_gate,
-        k14_backend=args.k14_backend
+        k14_backend=args.k14_backend,
+        use_homography=not args.no_homography,
+        use_noise_weight=not args.no_noise_weight
     )
 
 
