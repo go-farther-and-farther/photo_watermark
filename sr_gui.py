@@ -174,7 +174,7 @@ class App:
         c = ttk.Checkbutton(f3c, text='K14增强(AI)', variable=self.var_engine14)
         c.pack(side='left', padx=(14, 2))
         ToolTip(c, '改用外部 K14 神经网络引擎合成（效果更好，需本机装有 JSR/Bridge 并指定位置）。\n'
-                   '仅支持 2x；该引擎是他人的闭源软件，仅限本机自己使用')
+                   '仅支持 2x、组内至少 14 帧（不足自动改用内置管线）；该引擎是他人的闭源软件，仅限本机自己使用')
         self._btn_k14 = ttk.Button(f3c, text='K14后端…', command=self._pick_k14)
         self._btn_k14.pack(side='left', padx=2)
         ToolTip(self._btn_k14, '选择 K14 引擎程序的位置（JSR/Bridge 目录 resources 下的\n'

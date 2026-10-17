@@ -1317,7 +1317,10 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
                     with _rp.imread(str(raw_files[ref_idx])) as _raw:
                         as_shot_neutral = neutral_from_cam_mul(_raw.camera_whitebalance)
                 use_dng = as_shot_neutral is not None
-    if k14_backend and use_dng and scale == 2:
+    if k14_backend and use_dng and scale == 2 and len(all_frames) < K14_MAX_FRAMES:
+        # Fast K14 后端硬性要求恰好 14 帧：小组直接回退内置管线
+        print(f"  [K14] 组内仅 {len(all_frames)} 帧（引擎要求恰好 {K14_MAX_FRAMES} 帧），改用内置管线")
+    if k14_backend and use_dng and scale == 2 and len(all_frames) >= K14_MAX_FRAMES:
         # ===== K14 外挂引擎流程：分组/选帧/EXIF/交付归我们，对齐重建交给 K14 =====
         import shutil as _shutil
         base = str(output_path).rsplit('.', 1)[0]

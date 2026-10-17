@@ -13,7 +13,9 @@ a = Analysis(
            ('assets/fonts', 'assets/fonts'),
            ('C:\\Users\\LQL\\AppData\\Local\\Programs\\ExifTool', 'exiftool')],
     # imagecodecs：超分读 K14 输出 DNG（无损 JPEG SOF3）懒加载，PyInstaller 探不到
-    hiddenimports=['imagecodecs'],
+    # 顶层包是懒加载映射，实际实现在 _jpeg8 等私有子模块——必须显式列出，
+    # 否则运行时 `could not import name 'jpeg8_decode' from 'imagecodecs'`
+    hiddenimports=['imagecodecs', 'imagecodecs._jpeg8'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
