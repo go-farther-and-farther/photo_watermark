@@ -627,8 +627,65 @@ def _align_stats(ref_half, frm_half, P, gain=1.0, bias=0.0):
     return mf, rms
 
 
+def _local_field(ref_half, ali_half, tile=128, max_local=6.0, min_std=0.02, min_resp=0.10):
+    """分块相位相关测局部残差场（视差校正：最近物体帧间分歧可达数像素）。
+
+    ref_half/ali_half 同尺寸半图，ali 为按全局 warp 对齐后的帧（无效区=-1）。
+    约定与帧间平移一致：特征在 ref 的 q 处 -> 在 ali 的 q+offset 处；
+    融合采样时叠加 2*offset（半尺寸转全尺寸）。平坦块/低响应块/边界缺损块
+    留零（退化为纯全局 warp）。
+    返回 (offsets (J,K,2) float32 半尺寸单位, valid (J,K) bool)。
+    """
+    hh, hw = ref_half.shape
+    J, K = hh // tile, hw // tile
+    win = cv2.createHanningWindow((tile, tile), cv2.CV_32F)
+    offsets = np.zeros((J, K, 2), dtype=np.float32)
+    valid = np.zeros((J, K), dtype=bool)
+    for j in range(J):
+        for k in range(K):
+            r = ref_half[j * tile:(j + 1) * tile, k * tile:(k + 1) * tile]
+            if float(r.std()) < min_std:
+                continue
+            a = ali_half[j * tile:(j + 1) * tile, k * tile:(k + 1) * tile]
+            good = a >= 0
+            if int(good.sum()) < tile * tile * 0.6:
+                continue
+            a = np.where(good, a, 0.0).astype(np.float32)
+            (dx, dy), resp = cv2.phaseCorrelate(r * win, a * win)
+            if resp < min_resp:
+                continue
+            offsets[j, k] = (np.clip(dx, -max_local, max_local),
+                             np.clip(dy, -max_local, max_local))
+            valid[j, k] = True
+    return offsets, valid
+
+
+def _apply_field(off, SX, SY, tile_full=256):
+    """融合采样坐标叠加局部偏移场（单元中心双线性，网格外常数外推）。
+
+    off 为半尺寸单位控制格；SX/SY 为全尺寸场景坐标；返回全尺寸偏移 (dx, dy)。
+    """
+    J, K, _ = off.shape
+    gx = SX / tile_full - 0.5
+    gy = SY / tile_full - 0.5
+    gxf = np.floor(gx)
+    gyf = np.floor(gy)
+    ix = np.clip(gxf.astype(np.int32), 0, K - 2)
+    iy = np.clip(gyf.astype(np.int32), 0, J - 2)
+    fx = np.clip(gx - gxf, 0.0, 1.0).astype(np.float32)[..., None]
+    fy = np.clip(gy - gyf, 0.0, 1.0).astype(np.float32)[..., None]
+    o00 = off[iy, ix]
+    o01 = off[iy, ix + 1]
+    o10 = off[iy + 1, ix]
+    o11 = off[iy + 1, ix + 1]
+    out = (o00 + (o01 - o00) * fx) * (1 - fy) + (o10 + (o11 - o10) * fx) * fy
+    return (out[..., 0] * np.float32(2.0)).astype(np.float32), \
+           (out[..., 1] * np.float32(2.0)).astype(np.float32)
+
+
 def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camera_linear=False,
-              blur_gate=True, use_homography=True, use_noise_weight=True):
+              blur_gate=True, use_homography=True, use_noise_weight=True,
+              use_local_align=True):
     """
     超分辨率重建 v2：SR 网格直接融合
 
@@ -645,6 +702,9 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
       5. 对齐模型：相位相关 -> ECC 欧氏 -> ECC 单应（解析门控 + 残差验收，
          不达标退回欧氏——任何情况都不差于纯欧氏）
       6. 噪声感知加权：实测残差定权（锐帧多信、糊帧少信），截断 [0.5, 2]
+      7. 局部对齐（视差校正）：全局 warp 后分块相位相关精修残差平移，
+         最近物体的帧间分歧全局模型吃不掉（实测可达数像素），场修正残差
+         须优于全局（≤0.98×）才生效
 
     camera_linear=True 时帧按线性相机原生色彩空间解码（Linear DNG 用），
     融合结果保持线性、不做任何显示变换。
@@ -739,7 +799,7 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
               f"旋转={rot:+7.3f}°{extra} 增益={gains[i]:.4f} 偏置={biases[i]:+.4f} "
               f"运动占比={motion_frac[i]:.1%} 模糊RMS={blur_rms[i]:.4f}")
         del fg, fg_half
-    del ref_gray, ref_half
+    del ref_gray          # ref_half 留给局部对齐阶段（~10MB）
     gc.collect()
 
     # 剔除运动帧: 对齐后差异区域超过 15% 的帧整帧不用（人物走动/动物等）。
@@ -775,6 +835,51 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
             '建议: 该场景改用单张最佳帧，或提高快门速度/缩小画面占比重拍。')
     if len(usable) < n:
         gc.collect()
+
+    # 局部对齐（视差校正）：全局 warp 后分块相位相关精修残差平移。
+    # 最近物体的帧间分歧全局模型吃不掉（实测可达数像素），场修正残差
+    # 须优于全局（≤0.98×）才采纳，任何情况不差于纯全局 warp。
+    fields = {}
+    if use_local_align:
+        hh, hw = ref_half.shape
+        for i in usable:
+            if i == ref_idx:
+                continue
+            fg = np.power(np.clip(np.mean(frames[i], axis=2, dtype=np.float32) / 65535.0, 0, 1), 1 / 2.2)
+            fh = cv2.resize(fg, (fg.shape[1] // 2, fg.shape[0] // 2))
+            P32 = (S2i @ warps[i] @ S2).astype(np.float32)
+            xs = np.arange(hw, dtype=np.float32)
+            ys = np.arange(hh, dtype=np.float32)
+            den = P32[2, 0] * xs[None, :] + P32[2, 1] * ys[:, None] + P32[2, 2]
+            ali = cv2.remap(fh,
+                            (P32[0, 0] * xs[None, :] + P32[0, 1] * ys[:, None] + P32[0, 2]) / den,
+                            (P32[1, 0] * xs[None, :] + P32[1, 1] * ys[:, None] + P32[1, 2]) / den,
+                            interpolation=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT, borderValue=-1.0)
+            off, vld = _local_field(ref_half, ali)
+            rms_local = np.nan
+            if vld.any():
+                U, V = np.meshgrid(np.arange(hw, dtype=np.float32), np.arange(hh, dtype=np.float32))
+                dxf, dyf = _apply_field(off, U * 2, V * 2)
+                corr = cv2.remap(ali, U + dxf / 2, V + dyf / 2, interpolation=cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_CONSTANT, borderValue=-1.0)
+                good = corr >= 0
+                if int(good.sum()) > 100:
+                    cc = np.clip(corr * float(gains[i]) + float(biases[i]), 0, 1)
+                    rms_local = float(np.sqrt(np.mean(((cc - ref_half)[good]) ** 2)))
+            del fg, fh, ali
+            if (not vld.any() or not np.isfinite(rms_local)
+                    or not np.isfinite(blur_rms[i]) or rms_local > 0.98 * blur_rms[i]):
+                continue
+            fields[i] = off
+            print(f"  局部对齐 {raw_files[i].name}: {int(vld.sum())}块有效, "
+                  f"中位|F|={float(np.median(np.abs(off[vld]))):.2f}px(半), "
+                  f"rms {blur_rms[i]:.4f}->{rms_local:.4f}")
+            blur_rms[i] = rms_local
+        if fields:
+            print(f"  局部对齐生效帧: {','.join(raw_files[i].stem for i in fields)}")
+            gc.collect()
+
     gains_u = gains[usable]
     biases_u = biases[usable]
     # 噪声感知加权：实测残差定权（K14 显式噪声参数的等效实现，不需要机型噪声表）
@@ -797,6 +902,11 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
         per_m = min(int(np.ceil(max_persp)), 50)
         rot_mx += per_m
         rot_my += per_m
+    if fields:
+        max_f = max(float(np.max(np.abs(o))) for o in fields.values())
+        loc_m = min(int(np.ceil(max_f * 2)), 30)   # 偏移场最大位移（半->全尺寸）
+        rot_mx += loc_m
+        rot_my += loc_m
     crop_x0 = max(0, int(np.ceil(-min_dx))) + rot_mx
     crop_x1 = min(w, int(np.floor(w - max_dx))) - rot_mx
     crop_y0 = max(0, int(np.ceil(-min_dy))) + rot_my
@@ -830,16 +940,18 @@ def reconstruct(raw_files, shifts, ref_idx, scale, use_deghost, tile=1024, camer
             for j, i in enumerate(usable):
                 if any_proj:
                     mx, my = _proj_coords(warps[i], SX, SY)
-                    S[j] = cv2.remap(frames[i], mx.astype(np.float32), my.astype(np.float32),
-                                     interpolation=cv2.INTER_CUBIC,
-                                     borderMode=cv2.BORDER_REPLICATE)
                 else:
-                    # 纯平移/旋转组：仿射快路径，与单应引入前的输出逐位一致
+                    # 纯平移/旋转组：仿射快路径，与局部对齐引入前的输出逐位一致
                     A = warps[i][:2].astype(np.float32)
                     mx = (A[0, 0] * SX + A[0, 1] * SY + A[0, 2]).astype(np.float32)
                     my = (A[1, 0] * SX + A[1, 1] * SY + A[1, 2]).astype(np.float32)
-                    S[j] = cv2.remap(frames[i], mx, my, interpolation=cv2.INTER_CUBIC,
-                                     borderMode=cv2.BORDER_REPLICATE)
+                if i in fields:
+                    dxf, dyf = _apply_field(fields[i], SX, SY)
+                    mx = mx + dxf
+                    my = my + dyf
+                S[j] = cv2.remap(frames[i], mx.astype(np.float32), my.astype(np.float32),
+                                 interpolation=cv2.INTER_CUBIC,
+                                 borderMode=cv2.BORDER_REPLICATE)
             S -= biases_u[:, None, None, None]
             S *= gains_u[:, None, None, None]
             if robust:
@@ -1041,7 +1153,7 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
             rl_sharpen=True, blur_gate=True, k14_backend=None,
-            use_homography=True, use_noise_weight=True):
+            use_homography=True, use_noise_weight=True, use_local_align=True):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
@@ -1171,7 +1283,8 @@ def process(input_folder, output_path, scale=2, max_frames=16, max_shift=50.0,
         sr_result, (orig_w, orig_h) = reconstruct(raw_files, shifts, ref_idx, scale, use_deghost,
                                                   tile, camera_linear=use_dng, blur_gate=blur_gate,
                                                   use_homography=use_homography,
-                                                  use_noise_weight=use_noise_weight)
+                                                  use_noise_weight=use_noise_weight,
+                                                  use_local_align=use_local_align)
 
     base = str(output_path).rsplit('.', 1)[0]
     ref_frame = raw_files[ref_idx]
@@ -1374,6 +1487,7 @@ def main():
     parser.add_argument("--no-blur-gate", action="store_true", help="关闭模糊 RMS 选帧门限")
     parser.add_argument("--no-homography", action="store_true", help="关闭单应精修（退回欧氏对齐）")
     parser.add_argument("--no-noise-weight", action="store_true", help="关闭噪声感知融合加权")
+    parser.add_argument("--no-local-align", action="store_true", help="关闭局部对齐（视差校正）")
     parser.add_argument("--k14-backend", default=None,
                         help="Jiangtherapee Fast K14 后端 exe 路径（外挂引擎，2x 专用）")
 
@@ -1384,7 +1498,8 @@ def main():
         rl_sharpen=not args.no_rl_sharpen, blur_gate=not args.no_blur_gate,
         k14_backend=args.k14_backend,
         use_homography=not args.no_homography,
-        use_noise_weight=not args.no_noise_weight
+        use_noise_weight=not args.no_noise_weight,
+        use_local_align=not args.no_local_align
     )
 
 

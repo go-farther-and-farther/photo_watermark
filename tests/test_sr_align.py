@@ -201,3 +201,75 @@ class TestRefineHomography:
         persp = abs(H[2, 0]) * 512 + abs(H[2, 1]) * 512
         assert rot < 0.02
         assert persp < 5e-3                          # 无透视输入不造透视
+
+
+class TestLocalField:
+    """局部偏移场：分块相位相关测残差平移（视差校正的基础）"""
+
+    def _tex(self, size=512, seed=11):
+        rng = np.random.default_rng(seed)
+        n = rng.uniform(0, 1, (size, size)).astype(np.float32)
+        t = cv2.GaussianBlur(n, (0, 0), 1.5)
+        t -= t.min()
+        return t / t.max()
+
+    def test_recovers_piecewise_shift(self):
+        ref = self._tex()
+        # 左半 tiles 内容整体移 (+2,+1)，右半不动 -> 场应分别恢复
+        ali = np.zeros_like(ref)
+        M = np.array([[1, 0, 2], [0, 1, 1]], dtype=np.float32)
+        ali[:, :256] = cv2.warpAffine(ref[:, :256], M, (256, 512),
+                                      borderMode=cv2.BORDER_REPLICATE)
+        ali[:, 256:] = ref[:, 256:]
+        field, valid = sr_process._local_field(ref, ali, tile=128, max_local=6.0)
+        assert valid.shape == (4, 4)
+        assert valid[:, :2].all() and valid[:, 2:].all()
+        left = field[:, :2]      # (J,2,2)
+        assert np.allclose(left[..., 0], 2.0, atol=0.35), left[..., 0]
+        assert np.allclose(left[..., 1], 1.0, atol=0.35), left[..., 1]
+        assert np.allclose(field[:, 2:], 0.0, atol=0.35)
+
+    def test_flat_tiles_invalid(self):
+        ref = self._tex()
+        ref[:256, :] = 0.5       # 上半全平 -> 上半 tiles 应无效
+        ali = cv2.warpAffine(ref, np.array([[1, 0, 1.5], [0, 1, 0.5]], np.float32),
+                             (512, 512), borderMode=cv2.BORDER_REPLICATE)
+        field, valid = sr_process._local_field(ref, ali, tile=128, max_local=6.0)
+        assert not valid[:2].any()
+        assert valid[2:].all()
+
+    def test_clamped_to_max_local(self):
+        ref = self._tex()
+        ali = cv2.warpAffine(ref, np.array([[1, 0, 30], [0, 1, 0]], np.float32),
+                             (512, 512), borderMode=cv2.BORDER_REPLICATE)
+        field, valid = sr_process._local_field(ref, ali, tile=128, max_local=6.0)
+        assert np.all(np.abs(field) <= 6.0 + 1e-6)
+
+
+class TestApplyField:
+    """融合采样坐标叠加偏移场：双线性 + 网格外常数外推（全尺寸坐标口径）"""
+
+    def test_zero_field_identity(self):
+        SX, SY = np.meshgrid(np.arange(0, 400, 7.3), np.arange(0, 300, 5.1))
+        off = np.zeros((3, 4, 2), dtype=np.float32)
+        dx, dy = sr_process._apply_field(off, SX, SY, tile_full=256)
+        assert np.array_equal(dx, np.zeros_like(SX))
+        assert np.array_equal(dy, np.zeros_like(SY))
+
+    def test_constant_field_added(self):
+        SX = np.array([[100.0, 900.0]])
+        SY = np.array([[50.0, 50.0]])
+        off = np.zeros((4, 4, 2), dtype=np.float32)
+        off[:, :] = (1.5, -2.0)  # 半尺寸单位
+        dx, dy = sr_process._apply_field(off, SX, SY, tile_full=256)
+        assert np.allclose(dx, 3.0)    # x2 转全尺寸
+        assert np.allclose(dy, -4.0)
+
+    def test_bilinear_between_regions(self):
+        # 场左半=+2、右半=+4（半尺寸），控制点中点插值应为 +3（全尺寸 6）
+        off = np.zeros((2, 4, 2), dtype=np.float32)
+        off[:, :2] = (2.0, 0.0)
+        off[:, 2:] = (4.0, 0.0)
+        SX = np.array([[512.0]])   # tile_full=256 -> gx = 512/256-0.5 = 1.5（列1、2正中）
+        dx, _ = sr_process._apply_field(off, SX, np.array([[100.0]]), tile_full=256)
+        assert np.allclose(dx, 6.0), dx

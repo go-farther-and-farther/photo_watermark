@@ -121,6 +121,8 @@ class App:
         ttk.Checkbutton(f3b, text='单应对齐(透视精修)', variable=self.var_homo).pack(side='left', padx=(14, 2))
         self.var_nwt = tk.BooleanVar(value=True)
         ttk.Checkbutton(f3b, text='噪声加权(锐帧多信)', variable=self.var_nwt).pack(side='left', padx=(14, 2))
+        self.var_local = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f3b, text='局部对齐(视差校正)', variable=self.var_local).pack(side='left', padx=(14, 2))
 
         f4 = ttk.Frame(self.root); f4.pack(fill='x', **pad)
         ttk.Button(f4, text='① 扫描并判定', command=self._detect).pack(side='left', padx=4)
@@ -314,6 +316,7 @@ class App:
         rl = self.var_rl.get()
         homo = self.var_homo.get()
         nwt = self.var_nwt.get()
+        local_al = self.var_local.get()
         use_k14 = self.var_engine14.get()
         k14 = self.var_k14.get().strip() or None
         if use_k14 and not k14:
@@ -363,7 +366,8 @@ class App:
                                     rl_sharpen=rl,
                                     k14_backend=(k14 if use_k14 else None),
                                     use_homography=homo,
-                                    use_noise_weight=nwt)
+                                    use_noise_weight=nwt,
+                                    use_local_align=local_al)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:
