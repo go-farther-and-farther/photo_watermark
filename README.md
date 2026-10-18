@@ -124,6 +124,7 @@ python photo_watermark.py input.jpg -o output.jpg
   （平移+旋转）、lucky 选帧、细网格融合、按实测 PSF 去卷积与多尺度小波锐化；
   输出裁到主体的 Linear DNG 母版，不再产出 99.6% 是黑的巨幅画布
 - **修复**：黑主导画面（月亮/星空/深空）预览被全帧分位拉伸成白饼
+- **修复（2.1.1）**：白天大天空场景的预览把天空顶成纯白（亮部平台判据 + 白点留 25% 余量）
 
 > 许可说明：内嵌的 [ExifTool](https://exiftool.org/)（Phil Harvey 著）采用 **Artistic License 1.0 / GPL 双许可**，允许随软件再分发，因此内置打包合法。
 

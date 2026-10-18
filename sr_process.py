@@ -379,6 +379,18 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
                 out = np.clip(out / max(hi, 1e-6), 0, 1)
         else:
             lo = float(np.percentile(luma, 0.5))
+            # 大面积亮部（白天天空/白墙）：P99.5 会落在亮部内部，直接按它定白点
+            # 会把亮部顶成纯白（2026-10-18 实测：24mm 白天组天空 73% 像素 ≥250，
+            # 而 DNG 里天空峰值只有 0.90）。判据不是"亮部多"而是"顶部是个平台"：
+            # hi 与 P90 几乎重合（差 <0.05）说明有 10% 以上的像素挤在白点附近，
+            # 这时把白点抬高 25% 留出层次；夜拍/室内/普通风景 hi-P90 都在 0.1 以上，
+            # 行为完全不变。
+            p90 = float(np.percentile(luma, 90))
+            bright = float((luma > 0.85 * hi).mean()) if hi > 0 else 0.0
+            if bright > 0.10 and (hi - p90) < 0.05:
+                hi += 0.25 * (hi - lo)
+                print(f"  预览: 亮部平台（占 {bright:.0%}，hi-P90={hi - p90:.3f}），"
+                      f"白点留余量（hi={hi:.3f}）")
             out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
     out = _chroma_denoise(out.astype(np.float32))
     # 高光去色：0.88（伽马后）起向中性白平滑收敛

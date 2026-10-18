@@ -194,10 +194,14 @@ class TestDarkDominantPreview:
         assert med - inner > 0.05, '月面层次被拉平'
 
     def test_normal_scene_keeps_old_behaviour(self):
-        # 普通亮场景仍走原来的 0.5/99.5 全帧拉伸（不改变既有观感）
+        # 普通风景（暗部到高光跨度大、没有"亮部平台"）仍走原来的 0.5/99.5 全帧拉伸
         rng = np.random.default_rng(7)
-        base = 0.2 + 0.5 * np.clip(cv2.GaussianBlur(
-            rng.random((256, 256)).astype(np.float32), (0, 0), 8), 0, 1)
+        h, w = 256, 256
+        yy, xx = np.mgrid[0:h, 0:w]
+        base = 0.05 + 0.35 * np.clip(cv2.GaussianBlur(
+            rng.random((h, w)).astype(np.float32), (0, 0), 6), 0, 1)
+        base[yy > h - 40] = 0.02                     # 暗部
+        base[80:120, 60:120] = 0.85                  # 少量高光
         img = np.repeat(base[..., None], 3, axis=2)
         eye = np.eye(3, dtype=np.float64)
         out = sr_process.render_srgb_preview(img, (eye, 0.0), stretch=True)

@@ -1,0 +1,793 @@
+[
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63",
+  "start": 1789803813.099,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2062.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2063.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2064.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2065.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2066.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2067.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2068.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2069.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2070.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2071.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2072.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2073.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2074.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2075.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2076.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2077.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2078.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2079.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2080.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2081.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2082.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2083.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2084.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2085.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2086.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2087.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2088.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2089.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2090.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2091.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2092.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2093.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2094.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2095.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2096.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2097.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_2098.JPG"
+  ],
+  "reason": "建议用 8 帧（画面移动 5.8px，帧间抖动差异 1.20px）",
+  "metrics": {
+   "max_shift_px": 5.757544415978156,
+   "subpixel_spread_px": 1.2032529158567995
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788787787.028,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0968.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0969.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0970.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0971.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0972.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0973.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0974.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0975.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0976.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0977.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0978.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 9.7px，帧间抖动差异 1.06px）",
+  "metrics": {
+   "max_shift_px": 9.734482155801915,
+   "subpixel_spread_px": 1.0647193797914933
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792165888.09,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0094.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0095.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0096.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0098.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0100.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0101.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0102.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0103.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0104.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0105.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0106.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0107.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0108.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0109.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0110.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0111.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0112.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0113.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0114.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0117.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0118.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0119.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0120.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0121.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0122.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0123.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0124.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0125.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0126.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0127.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0128.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0129.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 61.8px，帧间抖动差异 1.04px）",
+  "metrics": {
+   "max_shift_px": 61.843049295161656,
+   "subpixel_spread_px": 1.0374679297633453
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788607864.016,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0797.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0798.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0799.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0800.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0801.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0802.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0803.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0804.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0805.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0806.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0807.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 7.0px，帧间抖动差异 0.94px）",
+  "metrics": {
+   "max_shift_px": 6.999139024384763,
+   "subpixel_spread_px": 0.9424630067374742
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792165829.053,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0063.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0065.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0066.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0067.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0070.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0071.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0073.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0074.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0075.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0076.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0079.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0080.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0081.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0083.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0084.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0085.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0086.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0088.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0090.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0091.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0092.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0093.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 118.3px，帧间抖动差异 0.94px）",
+  "metrics": {
+   "max_shift_px": 118.29772134401401,
+   "subpixel_spread_px": 0.9361416517862299
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\109_PANA",
+  "start": 1792156824.28,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093278.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093279.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093280.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093281.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093282.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093283.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093284.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093285.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093286.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093287.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093288.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093289.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093290.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093291.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093292.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093293.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093294.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093295.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093296.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093297.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093298.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093299.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093300.RW2",
+   "C:\\Users\\LQL\\Pictures\\raw\\109_PANA\\P1093301.RW2"
+  ],
+  "reason": "建议用 8 帧（画面移动 74.1px，帧间抖动差异 0.88px）",
+  "metrics": {
+   "max_shift_px": 74.05812775792612,
+   "subpixel_spread_px": 0.8762991672582798
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452197.087,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8733.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8734.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8735.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8736.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8737.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8738.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8739.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8740.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8741.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8742.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8743.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8744.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8745.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8746.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8747.NEF"
+  ],
+  "reason": "建议用 7 帧，已剔除 1 帧（画面移动 66.0px，帧间抖动差异 0.83px）",
+  "metrics": {
+   "max_shift_px": 66.02922138131206,
+   "subpixel_spread_px": 0.8287672134916412
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792227680.079,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0200.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0201.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0202.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0203.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0204.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0205.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0206.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0207.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0208.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0209.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0210.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0211.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0212.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0213.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 52.9px，帧间抖动差异 0.85px）",
+  "metrics": {
+   "max_shift_px": 52.88957102790457,
+   "subpixel_spread_px": 0.8523878897915735
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788787808.044,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0979.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0980.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0981.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0982.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0983.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0984.NEF"
+  ],
+  "reason": "建议用 6 帧（画面移动 9.6px，帧间抖动差异 1.20px）",
+  "metrics": {
+   "max_shift_px": 9.644211090754835,
+   "subpixel_spread_px": 1.1987618289397126
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788788366.035,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1003.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1004.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1005.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1006.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1007.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1008.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1009.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1010.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1011.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 13.7px，帧间抖动差异 0.93px）",
+  "metrics": {
+   "max_shift_px": 13.698037965732514,
+   "subpixel_spread_px": 0.9251327508741942
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788788381.029,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1012.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1013.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1014.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1015.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1016.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1017.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1018.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1019.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 11.0px，帧间抖动差异 0.90px）",
+  "metrics": {
+   "max_shift_px": 11.038761956302183,
+   "subpixel_spread_px": 0.8954811622165115
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63",
+  "start": 1789805850.03,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1040.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1041.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1042.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1043.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1044.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1045.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1046.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1047.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1048.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1049.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1050.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1051.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1052.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1053.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1054.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1055.NEF"
+  ],
+  "reason": "建议用 4 帧，已剔除 12 帧（画面移动 407.1px，帧间抖动差异 0.59px）",
+  "metrics": {
+   "max_shift_px": 407.11355213602474,
+   "subpixel_spread_px": 0.5923928036146778
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1789730496.088,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1185.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1186.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1187.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1188.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1189.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1190.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1191.NEF"
+  ],
+  "reason": "建议用 7 帧（画面移动 19.4px，帧间抖动差异 1.06px）",
+  "metrics": {
+   "max_shift_px": 19.39895910573867,
+   "subpixel_spread_px": 1.0584855988276958
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63",
+  "start": 1789804596.073,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_0305.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_0306.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_0307.JPG",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_0308.JPG"
+  ],
+  "reason": "建议用 4 帧（画面移动 2.7px，帧间抖动差异 1.14px）",
+  "metrics": {
+   "max_shift_px": 2.669480748731199,
+   "subpixel_spread_px": 1.1378916419679275
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792226776.075,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0189.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0190.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0191.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0192.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0193.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0194.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0195.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0196.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0197.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0198.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0199.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 55.9px，帧间抖动差异 0.93px）",
+  "metrics": {
+   "max_shift_px": 55.936397031934064,
+   "subpixel_spread_px": 0.9294326500562377
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788787829.032,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0985.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0986.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0987.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0988.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0989.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0990.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0991.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0992.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0993.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 45.8px，帧间抖动差异 1.01px）",
+  "metrics": {
+   "max_shift_px": 45.75546122083389,
+   "subpixel_spread_px": 1.0075684064787822
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63",
+  "start": 1789805816.084,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1029.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1030.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1031.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1032.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1033.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1034.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1035.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1036.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1037.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1038.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1039.NEF"
+  ],
+  "reason": "建议用 5 帧，已剔除 3 帧（画面移动 308.2px，帧间抖动差异 0.95px）",
+  "metrics": {
+   "max_shift_px": 308.211099218285,
+   "subpixel_spread_px": 0.9482926887330236
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792226766.006,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0178.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0179.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0180.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0181.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0182.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0183.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0184.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0185.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0186.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0187.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0188.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 78.6px，帧间抖动差异 0.95px）",
+  "metrics": {
+   "max_shift_px": 78.56723609323943,
+   "subpixel_spread_px": 0.9476766265576138
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6",
+  "start": 1792148144.095,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0015.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0016.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0017.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0018.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0019.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0020.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0021.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\100NCZ_6\\DSC_0022.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 31.8px，帧间抖动差异 0.90px）",
+  "metrics": {
+   "max_shift_px": 31.782204426500904,
+   "subpixel_spread_px": 0.8961556612068068
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1789730483.037,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1180.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1181.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1182.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1183.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1184.NEF"
+  ],
+  "reason": "建议用 5 帧（画面移动 19.4px，帧间抖动差异 0.92px）",
+  "metrics": {
+   "max_shift_px": 19.437945174190364,
+   "subpixel_spread_px": 0.9176301943504854
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788787846.09,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0994.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0995.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0996.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0997.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0998.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0999.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1000.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1001.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1002.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 69.1px，帧间抖动差异 0.93px）",
+  "metrics": {
+   "max_shift_px": 69.09835375625616,
+   "subpixel_spread_px": 0.9310201426631982
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709022532.011,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6990.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6991.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6992.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6993.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6994.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6995.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6996.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6997.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6998.NEF"
+  ],
+  "reason": "建议用 6 帧，已剔除 2 帧（画面移动 371.6px，帧间抖动差异 0.92px）",
+  "metrics": {
+   "max_shift_px": 371.62458350198403,
+   "subpixel_spread_px": 0.9168131549540153
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1790594492.0,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1263.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1264.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1265.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_1266.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 2.1px，帧间抖动差异 0.77px）",
+  "metrics": {
+   "max_shift_px": 2.134571682969431,
+   "subpixel_spread_px": 0.7701877718481542
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_101",
+  "start": 1784534930.057,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_2500.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_2501.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_2502.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_2503.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 10.2px，帧间抖动差异 0.82px）",
+  "metrics": {
+   "max_shift_px": 10.21859642205075,
+   "subpixel_spread_px": 0.8162741453904934
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709022378.07,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6940.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6942.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6943.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6944.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6945.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6946.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6950.NEF"
+  ],
+  "reason": "建议用 7 帧（画面移动 121.5px，帧间抖动差异 1.03px）",
+  "metrics": {
+   "max_shift_px": 121.52759187837016,
+   "subpixel_spread_px": 1.0293294227898264
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63",
+  "start": 1789805801.004,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1021.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1022.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1023.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1024.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1025.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1026.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1027.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\ZRZ9Z63\\DSC_1028.NEF"
+  ],
+  "reason": "建议用 8 帧（画面移动 283.2px，帧间抖动差异 0.89px）",
+  "metrics": {
+   "max_shift_px": 283.19889542101885,
+   "subpixel_spread_px": 0.8874879836859222
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_102",
+  "start": 1712219383.044,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2292.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2293.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2294.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2295.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2296.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2297.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2298.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2299.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_2300.NEF"
+  ],
+  "reason": "建议用 6 帧，已剔除 2 帧（画面移动 842.3px，帧间抖动差异 0.75px）",
+  "metrics": {
+   "max_shift_px": 842.2631166848342,
+   "subpixel_spread_px": 0.7451259754018691
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101",
+  "start": 1788787691.07,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0955.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0956.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0957.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_2_101\\DSC_0958.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 48.8px，帧间抖动差异 1.03px）",
+  "metrics": {
+   "max_shift_px": 48.832314348978464,
+   "subpixel_spread_px": 1.0348497350026975
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_101",
+  "start": 1785917777.021,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3586.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3587.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3588.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3589.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 184.2px，帧间抖动差异 1.10px）",
+  "metrics": {
+   "max_shift_px": 184.17073356861974,
+   "subpixel_spread_px": 1.1005452119195873
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452185.025,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8725.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8726.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8727.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8728.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8729.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8730.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8731.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8732.NEF"
+  ],
+  "reason": "建议用 6 帧，已剔除 2 帧（画面移动 160.7px，帧间抖动差异 0.66px）",
+  "metrics": {
+   "max_shift_px": 160.6883421947479,
+   "subpixel_spread_px": 0.6569220247750851
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452234.074,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8752.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8753.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8754.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8755.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8756.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8757.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8758.NEF"
+  ],
+  "reason": "建议用 4 帧，已剔除 3 帧（画面移动 80.7px，帧间抖动差异 0.73px）",
+  "metrics": {
+   "max_shift_px": 80.66300209928745,
+   "subpixel_spread_px": 0.731516627226644
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_102",
+  "start": 1711278862.054,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_0973.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_0974.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_0977.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_102\\DSC_0978.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 47.9px，帧间抖动差异 0.87px）",
+  "metrics": {
+   "max_shift_px": 47.93611347842702,
+   "subpixel_spread_px": 0.8739808104718297
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452257.064,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8759.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8760.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8761.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8762.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8763.NEF"
+  ],
+  "reason": "建议用 5 帧（画面移动 115.1px，帧间抖动差异 0.68px）",
+  "metrics": {
+   "max_shift_px": 115.09409612058747,
+   "subpixel_spread_px": 0.67942140405434
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452018.028,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8712.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8714.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8715.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8716.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 91.7px，帧间抖动差异 0.76px）",
+  "metrics": {
+   "max_shift_px": 91.67241400599407,
+   "subpixel_spread_px": 0.7626414851005849
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_101",
+  "start": 1785986423.049,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3684.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3685.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3686.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3687.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 30.6px，帧间抖动差异 0.43px）",
+  "metrics": {
+   "max_shift_px": 30.603555839104008,
+   "subpixel_spread_px": 0.4342601982462879
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1708748656.021,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6421.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6422.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6423.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_6424.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 298.9px，帧间抖动差异 0.76px）",
+  "metrics": {
+   "max_shift_px": 298.9043201258075,
+   "subpixel_spread_px": 0.759862842236011
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z30_101",
+  "start": 1709452231.04,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8748.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8749.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8750.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z30_101\\DSC_8751.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 76.5px，帧间抖动差异 0.71px）",
+  "metrics": {
+   "max_shift_px": 76.50231695375547,
+   "subpixel_spread_px": 0.7126022460083757
+  }
+ },
+ {
+  "dir": "C:\\Users\\LQL\\Pictures\\raw\\Z7_101",
+  "start": 1785917665.055,
+  "files": [
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3577.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3578.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3579.NEF",
+   "C:\\Users\\LQL\\Pictures\\raw\\Z7_101\\DSC_3580.NEF"
+  ],
+  "reason": "建议用 4 帧（画面移动 290.1px，帧间抖动差异 0.50px）",
+  "metrics": {
+   "max_shift_px": 290.0809334911569,
+   "subpixel_spread_px": 0.4981982658367326
+  }
+ }
+]
