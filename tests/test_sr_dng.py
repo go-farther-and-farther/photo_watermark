@@ -159,6 +159,29 @@ class TestWriteLinearDng:
         np.testing.assert_array_equal(raw, arr)
 
 
+class TestJpegXlDng:
+    def test_lossless_jxl_dng_roundtrip(self, tmp_path):
+        """DNG 1.7 + JPEG XL 无损：体积远小于无压缩，像素可逐位读回。"""
+        et = _exiftool_or_skip()
+        import subprocess
+        rng = np.random.default_rng(5)
+        arr = (rng.random((96, 64, 3)) * 65535).astype(np.uint16)
+        dng = tmp_path / "jxl_1.5x.dng"
+        assert sr_process.write_linear_dng(
+            dng, arr, Z6_MATRIX, [0.6337, 1.0, 0.6344],
+            camera_model="NIKON Z 6", exiftool=et,
+            compression='jpegxl_dng', dng_version='1.7.0.0')
+
+        r = subprocess.run([et, '-s3', '-DNGVersion', '-Compression', str(dng)],
+                           capture_output=True, text=True)
+        assert '1.7.0.0' in r.stdout
+        assert 'JPEG XL' in r.stdout
+        tf = tifffile.TiffFile(str(dng))
+        assert tf.pages[0].tags[0xC612].value == b'\x01\x07\x00\x00'
+        back = sr_process.load_subifd_rgb(dng)
+        np.testing.assert_array_equal(back, arr)
+
+
 class TestDeriveCameraToSrgb:
     @pytest.mark.skipif(not Z6_NEF.exists(), reason="无真实 Z6 NEF 测试文件")
     def test_affine_from_real_nef(self):

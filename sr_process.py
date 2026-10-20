@@ -114,8 +114,10 @@ def copy_exif_from_frame(exiftool, ref_path, target_path, width, height):
     import subprocess
     cmd = [exiftool, '-tagsfromfile', str(ref_path),
            '-EXIF:all', '--MakerNotes', '--PreviewImage', '--CFAPattern',
+           '--Orientation',
            '--EXIF:ExifImageWidth', '--EXIF:ExifImageHeight',
            f'-ExifImageWidth={width}', f'-ExifImageHeight={height}',
+           '-IFD0:Orientation#=1',
            '-overwrite_original', '-q', str(target_path)]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=120)
@@ -403,15 +405,20 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
 
 
 def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
-                     exiftool, preview_rgb=None, orig_raw_name=None):
+                     exiftool, preview_rgb=None, orig_raw_name=None,
+                     compression=None, compressionargs=None,
+                     dng_version='1.4.0.0'):
     """写 Linear DNG：Adobe 结构（IFD0 预览 + SubIFD LinearRaw 512 瓦片），ExifTool 补标签
 
     LR/ACR 打开后即为 raw：Kelvin 色温、相机配置文件、镜头矫正全部可用。
     结构必须遵 Adobe 惯例：raw 在 SubIFD（NewSubfileType=0）、IFD0 放 RGB 预览
     （NewSubfileType=1）、raw 数据 512 瓦片分块——单 IFD 裸结构（raw 直接在 IFD0、
     单条巨 strip）Lightroom 一律拒收（实测同标签集下 Adobe 结构可导入、单 IFD 被拒）。
-    压缩必须无压缩（~600MB@24MP×2）——Lightroom 的 DNG 读取器对 LinearRaw 只
-    稳定支持 JPEG-LL/无压缩，Adobe Deflate 会被拒收（实测打不开）。
+
+    compression：None=无压缩（兼容性最稳）；'jpegxl_dng'=DNG 1.7 的 JPEG XL
+    （默认无损；compressionargs={'lossless': False, 'distance': 0.5} 为有损，
+    体积可到无压缩的 1/20，LR 13+/ACR 16+ 支持）。
+    Adobe Deflate 对 LinearRaw 会被 LR 拒收，不要用。
 
     exiftool 写 DNG 标签的坑（exiftool 13.59 实测）：
     - BlackLevel/WhiteLevel/DefaultCrop*/ActiveArea 等 raw 几何标签被路由到 SubIFD
@@ -439,13 +446,14 @@ def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
     with tifffile.TiffWriter(str(path)) as tw:
         tw.write(prev, photometric=2, compression=None, planarconfig='CONTIG',
                  subfiletype=1, subifds=1, resolution=(72, 72))
-        tw.write(arr_u16, photometric=34892, compression=None, planarconfig='CONTIG',
-                 subfiletype=0, tile=(tile, tile))
+        tw.write(arr_u16, photometric=34892, compression=compression,
+                 compressionargs=compressionargs,
+                 planarconfig='CONTIG', subfiletype=0, tile=(tile, tile))
     m = ' '.join(f'{float(v):.6g}' for v in np.asarray(color_matrix).ravel())
     n = ' '.join(f'{float(v):.6g}' for v in as_shot_neutral)
     cmd = [exiftool,
-           '-DNGVersion=1.4.0.0',
-           '-DNGBackwardVersion=1.4.0.0',
+           f'-DNGVersion={dng_version}',
+           f'-DNGBackwardVersion={dng_version}',
            f'-UniqueCameraModel={camera_model}',
            f'-ColorMatrix1={m}',
            '-CalibrationIlluminant1=D65',
