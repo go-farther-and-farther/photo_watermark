@@ -1505,6 +1505,20 @@ def load_subifd_rgb(dng_path):
     raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
 
 
+def _master_output_size(w, h, scale, master_scale):
+    """母版输出尺寸与倍率：master_scale < scale 时按比例缩小，否则等于输出。
+
+    2x 融合再降到 1.5x 是一次超采样下采样（比直接在 1.5x 网格融合更干净），
+    6×9 档体积约为 8×12 的 56%。
+    """
+    ms = (float(master_scale) if master_scale and float(master_scale) < float(scale)
+          else float(scale))
+    if ms == float(scale):
+        return int(w), int(h), float(scale)
+    k = ms / float(scale)
+    return max(1, int(round(w * k))), max(1, int(round(h * k))), ms
+
+
 def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=0.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
@@ -1715,17 +1729,30 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
         transform = derive_camera_to_srgb(ref_frame)
         if transform is None:
             transform = (np.eye(3), np.zeros(3))  # 极端兜底（仅观感退化，不阻断输出）
-        preview_master = render_srgb_preview(sr_result, transform, stretch=False)
-        dng_path = base + f'_{scale}x.dng'
-        if not write_linear_dng(dng_path, arr_u16, dng_meta['matrix'], as_shot_neutral,
+        # 母版倍率：默认与输出同倍率；master_scale=1.5 时在 2x 融合结果上
+        # 按线性光降采样（4×6 -> 6×9，体积约 56%，仍保留超采样收益）。
+        mw, mh, ms = _master_output_size(out_w, out_h, scale, master_scale)
+        if (mw, mh) == (out_w, out_h):
+            master_u16 = arr_u16
+            master_label = f'{scale}x'
+        else:
+            master_u16 = cv2.resize(arr_u16, (mw, mh), interpolation=cv2.INTER_AREA)
+            master_label = f'{ms:g}x'
+            print(f"  母版降采样: {out_w}x{out_h} -> {mw}x{mh}"
+                  f"（{master_label}，线性域 INTER_AREA）")
+        preview_master = render_srgb_preview(
+            master_u16.astype(np.float32) / 65535.0, transform, stretch=False)
+        dng_path = base + f'_{master_label}.dng'
+        if not write_linear_dng(dng_path, master_u16, dng_meta['matrix'], as_shot_neutral,
                                 dng_meta['model'], et,
                                 preview_rgb=preview_master, orig_raw_name=ref_frame.name):
             raise RuntimeError(f"DNG 写入失败: {dng_path}")
         dng_mb = Path(dng_path).stat().st_size / (1024*1024)
-        if copy_exif_from_frame(et, ref_frame, dng_path, width=out_w, height=out_h):
-            print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版, 完整EXIF已继承)")
+        if copy_exif_from_frame(et, ref_frame, dng_path, width=mw, height=mh):
+            print(f"  DNG:  {dng_path} ({mw}x{mh}, {dng_mb:.0f}MB, "
+                  f"Linear DNG 母版, 完整EXIF已继承)")
         else:
-            print(f"  DNG:  {dng_path} ({dng_mb:.0f}MB, Linear DNG 母版)")
+            print(f"  DNG:  {dng_path} ({mw}x{mh}, {dng_mb:.0f}MB, Linear DNG 母版)")
 
         jpg_path = base + f'_{scale}x.jpg'
         if rl_sharpen:
@@ -1746,7 +1773,8 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
 
         elapsed = time.time() - t0
         print(f"\n{'=' * 60}")
-        print(f"完成！ {orig_w}x{orig_h} → {out_w}x{out_h} (Linear DNG)")
+        print(f"完成！ {orig_w}x{orig_h} → {out_w}x{out_h} (2x JPG) / "
+              f"{mw}x{mh} (DNG 母版)")
         print(f"耗时: {elapsed:.1f} 秒")
         print(f"{'=' * 60}")
         return
@@ -1895,6 +1923,10 @@ def main():
     parser.add_argument("--max-frames", "-n", type=int, default=16, help="最大使用帧数")
     parser.add_argument("--max-shift", type=float, default=0.0,
                         help="最大允许位移(像素)，0=自动（画面最大边 8%%，保底 150）")
+    parser.add_argument("--master", type=float, default=None,
+                        help="调色母版倍率（如 1.5 = 4×6→6×9；默认与 --scale 相同）")
+    parser.add_argument("--no-dng", action="store_true",
+                        help="不输出 Linear DNG 母版，回退 sRGB 16bit TIF")
     parser.add_argument("--no-deghost", action="store_true", help="禁用去鬼影")
     parser.add_argument("--sharpen", type=float, default=0.3, help="锐化强度")
     parser.add_argument("--denoise", action="store_true", help="启用降噪")
@@ -1919,6 +1951,8 @@ def main():
     process(
         args.input, args.output, args.scale, args.max_frames, args.max_shift,
         not args.no_deghost, args.sharpen, args.denoise, 5, args.legacy, args.tile,
+        master_scale=args.master,
+        output_dng=(False if args.no_dng else None),
         rl_sharpen=not args.no_rl_sharpen, blur_gate=not args.no_blur_gate,
         sharp_gate=not args.no_sharp_gate,
         k14_backend=args.k14_backend,

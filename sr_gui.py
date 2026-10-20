@@ -144,11 +144,14 @@ class App:
         c.pack(side='left', padx=2)
         ToolTip(c, '输出类似"数码底片"的 DNG：白平衡、色温、镜头矫正全部留到 Lightroom 里随便调。\n'
                    'JPG 素材的组不支持，自动改出 TIF')
-        # 1.5x 压缩是 45MP 时代的选项（2x 输出上 GB 才需要）；24MP 默认直接留 2x 全尺寸 TIF
-        self.var_master = tk.BooleanVar(value=False)
-        c = ttk.Checkbutton(f3b, text='1.5x压缩TIF', variable=self.var_master)
+        # 1.5x 母版：4×6 -> 6×9 档，2x JPG 不变；DNG 模式输出 1.5x 线性 DNG，
+        # 非 DNG 模式输出 1.5x 压缩 TIF。高像素机身默认开（180MP 的 2x 母版太大）
+        self.var_master = tk.BooleanVar(value=True)
+        c = ttk.Checkbutton(f3b, text='1.5x母版(6×9)', variable=self.var_master)
         c.pack(side='left', padx=6)
-        ToolTip(c, '额外多出一份 1.5 倍的压缩 TIF（高像素机身时代选项，2400 万像素一般用不上）')
+        ToolTip(c, '母版按 1.5 倍输出（4×6 照片 → 6×9 档，体积约为 2x 的 56%）；\n'
+                   'DNG 底片模式下是 1.5x 线性 DNG（可调色温），否则是 16bit 压缩 TIF。\n'
+                   '2x JPG 始终按全尺寸输出，分享/查看用母版看 DNG/TIF')
         c = ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif)
         c.pack(side='left', padx=2)
         ToolTip(c, '额外保存一份全尺寸 16bit 无损 TIF（不压缩，体积很大，适合打印/精修）')
@@ -332,12 +335,14 @@ class App:
         while True:
             suffix = '' if n == 1 else f'_{n}'
             base = Path(dst) / f'组{gi:02d}_{tstr}{suffix}'
-            if use_dng:
-                taken = [Path(f'{base}_{scale}x.dng'), Path(f'{base}_{scale}x.jpg')]
+            taken = [Path(f'{base}_{scale}x.jpg')]
+            if master:
+                # DNG 勾选但 JPG 组会回退 TIF：两种后缀都算占用
+                taken += [Path(f'{base}_{master}x.dng'), Path(f'{base}_{master}x.tif')]
+            elif use_dng:
+                taken += [Path(f'{base}_{scale}x.dng'), Path(f'{base}.tif')]
             else:
-                taken = [Path(f'{base}_{scale}x.jpg'), Path(f'{base}.tif')]
-                if master:
-                    taken.append(Path(f'{base}_{master}x.tif'))
+                taken.append(Path(f'{base}.tif'))
             if not any(p.exists() for p in taken):
                 return base
             n += 1
@@ -365,7 +370,7 @@ class App:
         # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
         scale = self.var_scale.get()
         use_dng = self.var_dng.get()
-        master = 1.5 if (self.var_master.get() and not use_dng) else None
+        master = 1.5 if self.var_master.get() else None
         topk = self.var_topk.get()
         deghost = self.var_deghost.get()
         sharpen = self.var_sharpen.get()
@@ -432,11 +437,13 @@ class App:
                         continue
                     jpg = Path(f'{base}_{scale}x.jpg')
                     kept_master = None
-                    dng_path = Path(f'{base}_{scale}x.dng')
-                    if use_dng and dng_path.exists():
-                        kept_master = dng_path
-                    elif master:
-                        p = Path(f'{base}_{master}x.tif')
+                    if master:
+                        # DNG 组出 .dng，JPG 组回退 .tif：按实际存在取
+                        cands = [Path(f'{base}_{master}x.dng'),
+                                 Path(f'{base}_{master}x.tif')]
+                        kept_master = next((p for p in cands if p.exists()), None)
+                    elif use_dng:
+                        p = Path(f'{base}_{scale}x.dng')
                         kept_master = p if p.exists() else None
                     elif keep_tif:
                         p = Path(f'{base}.tif')

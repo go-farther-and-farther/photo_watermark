@@ -20,6 +20,7 @@
   - **自动扫描判定**：给一个几百上千张的照片文件夹（RAW+JPG 混放），自动找出连拍组并判定
     ✅ 可超分（默认勾选）/ 🧊 仅降噪（三脚架）/ ❌ 不可（帧数、抖动、内容运动）/ ✔️ 已完成（不重复合成），勾选后批量合成
   - 对齐（平移+旋转+光度校正）→ SR 网格鲁棒融合，RAW 组默认输出 **Linear DNG 母版**——Lightroom 里 Kelvin 色温、相机配置文件、镜头矫正全部可调（Adobe Super Resolution 同款思路），另附 sRGB JPG 预览；完整 EXIF 自动继承（ExifTool，含镜头型号）
+  - 默认「**1.5x 母版 + 2x JPG**」：2x 网格融合后线性降到 1.5x（4×6 → 6×9 档，体积约 2x 的 56%），JPG 仍按 2x 全尺寸分享
   - 手持连拍 16-25 张、每帧有自然亚像素位移时，可合成出真实细节超过单帧的超分图
   - 可选依赖：`rawpy`、`opencv-python`、`tifffile`、`piexif`（仅超分功能需要，缺了不影响水印和 EXIF 功能）
   - 算法细节见 [docs/super_res/README.md](docs/super_res/README.md)
@@ -110,7 +111,7 @@ python photo_watermark.py input.jpg -o output.jpg
 
 ### 直接下载exe
 
-下载 **`photo_watermark_v2.1.0.exe`**（约 93MB），无需安装 Python 环境。文件名带版本号，
+下载 **`photo_watermark_v2.1.2.exe`**（约 93MB），无需安装 Python 环境。文件名带版本号，
 方便区分和分享；程序内部版本与文件名一致。
 
 **单一全量版**：内置整个 ExifTool，在任何电脑上零依赖，对任何品牌/格式（NEF、ARW、CR3 等）
@@ -509,6 +510,7 @@ MIT License
 
 ## 更新日志
 
+- **v2.1.2**：超分母版默认改「1.5x（4×6→6×9）+ 2x JPG」——2x 网格融合后按线性光降到 1.5x，DNG 模式输出 1.5x Linear DNG（体积约 2x 的 56%），JPG 仍 2x 全尺寸；CLI 新增 `--master 1.5` / `--no-dng`
 - **v1.7.4**：官方LOGO字标从 `art` 样式中拆出，成为独立样式 **`wordmark`（官方LOGO）**：品牌官方LOGO字标+机型+参数叠加照片底部（无边框），字标大小独立可调（默认 0.040，比之前大，0.020–0.080 滑杆）、独立颜色/阴影设置；未匹配品牌时自动回退艺术字。`art` 样式回归纯艺术字（字体文件可自定义）；设置窗口新增「官方LOGO字标」区块，六样式预览同步更新
   - 字标图重制：连通区域过滤去掉源 logo 上的对角虚线等杂质（修复 nikon 字标偏小问题，i 的点按形状特征保留）；渲染时紧凑裁剪+机型文字与字标同高（参考图版式）
 - **v1.7.3**：`art` 样式第一行优先使用**品牌官方LOGO字标**（内置 16 个品牌的透明字标图：Nikon/Canon/Sony/Fuji/Hasselblad/Olympus/Panasonic/Pentax/Ricoh/Leica/Xiaomi/Huawei/Apple/DJI/Vivo/OPPO，统一着色为文字颜色+柔和阴影，机型跟在字标后，如 "Nikon Z7 2"）；未匹配品牌时自动回退艺术字体；设置窗口新增「使用官方LOGO字标」勾选框（可切回纯艺术字）；EXIF 机型规范化（`Z7_2` → `Z7 2`）；输出文件已存在时自动 `_2`、`_3` 唯一命名

@@ -21,6 +21,7 @@ python sr_process.py \
   --scale 2 \                   # 超分倍率（默认 2）
   --max-frames 16 \             # 最大使用帧数（默认 16）
   --max-shift 50 \              # 最大允许位移/像素（默认 50）
+  --master 1.5 \                # 调色母版倍率（1.5=4×6→6×9；默认与 --scale 相同）
   --sharpen 0.5 \               # 锐化强度 0-1（默认 0.3）
   --denoise                     # 启用降噪
 ```
@@ -30,8 +31,13 @@ python sr_process.py \
 | 格式 | 说明 |
 |------|------|
 | **Linear DNG**（RAW 组默认） | 线性相机域融合的母版，LR/ACR 里就是 raw：**Kelvin 色温、色调、相机配置文件、镜头矫正全部可用**；不锐化/不降噪/不自动拉伸，调色全留给 LR |
-| 16-bit TIFF | JPG 组 / 无 ExifTool 时的回退输出 |
+| 16-bit TIFF | JPG 组 / 无 ExifTool / `--no-dng` 时的回退输出 |
 | JPG | sRGB 预览（WB→XYZ→sRGB 渲染，quality 90） |
+
+**母版倍率（6×9 档）**：默认在 2x 网格融合（保留全部亚相位信息），再按线性光
+`INTER_AREA` 降到 1.5x（`--master 1.5` 或 GUI「1.5x母版(6×9)」）。4×6 照片的 2x
+是 8×12、1.5x 是 6×9；1.5x 母版体积约为 2x 的 56%（101MP Linear DNG ≈ 600MB），
+而 JPG 始终按 2x 全尺寸输出。降采样本身就是一次超采样，比直接在 1.5x 网格融合更干净。
 
 **Linear DNG 细节**（设计：`docs/superpowers/specs/2026-10-16-linear-dng-design.md`）：
 

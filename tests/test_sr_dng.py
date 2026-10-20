@@ -215,6 +215,72 @@ class TestRealNefMetadata:
         assert med[0] > med[2]
 
 
+class TestMasterOutputSize:
+    """1.5x 母版：2x 融合后按线性光降采样到 6×9 档"""
+
+    def test_15x_size(self):
+        assert sr_process._master_output_size(8256, 5504, 2, 1.5) == (6192, 4128, 1.5)
+
+    def test_no_shrink_when_master_absent_or_equal(self):
+        assert sr_process._master_output_size(100, 80, 2, None) == (100, 80, 2.0)
+        assert sr_process._master_output_size(100, 80, 2, 2) == (100, 80, 2.0)
+
+
+class TestDngMasterScale:
+    def test_dng_master_is_15x_and_jpg_stays_2x(self, tmp_path, monkeypatch):
+        """DNG 模式也必须遵守 master_scale：母版 1.5x，JPG 仍 2x。
+
+        用 JPG 连拍模拟 RAW 组（把 .jpg 临时算作 RAW 扩展名），
+        只验证输出分支/尺寸/命名，不真写 DNG。
+        """
+        sys.path.insert(0, str(PROJECT_ROOT / 'tests'))
+        from test_sr import _base_image, _warp
+
+        img = _base_image()
+        files = []
+        for i, (dx, dy) in enumerate([(0, 0), (0.35, 0.6), (0.7, 0.1),
+                                      (-0.3, 0.45), (0.2, -0.35)]):
+            frame = (np.clip(_warp(img, dx, dy), 0, 1) * 255).astype(np.uint8)
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            p = tmp_path / f'f_{i}.jpg'
+            p.write_bytes(cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes())
+            files.append(p)
+
+        captured = {}
+
+        def fake_write(path, arr, *a, **k):
+            captured['shape'] = arr.shape
+            Path(path).write_bytes(b'x')
+            return True
+
+        monkeypatch.setattr(sr_process, 'RAW_EXTS', sr_process.RAW_EXTS + ('.jpg',))
+        monkeypatch.setattr('exif_reader.find_exiftool', lambda: 'exiftool')
+        monkeypatch.setattr(sr_process, 'extract_dng_metadata',
+                            lambda p: {'matrix': Z6_MATRIX, 'model': 'NIKON Z 6'})
+        monkeypatch.setattr(sr_process, 'measure_as_shot_neutral',
+                            lambda p: [0.6337, 1.0, 0.6344])
+        monkeypatch.setattr(sr_process, 'derive_camera_to_srgb',
+                            lambda p: (np.array(Z6_CAM_TO_SRGB), np.zeros(3)))
+        monkeypatch.setattr(sr_process, 'copy_exif_from_frame', lambda *a, **k: False)
+        monkeypatch.setattr(sr_process, 'write_linear_dng', fake_write)
+
+        sr_process.process(files=list(files), output_path=str(tmp_path / 'r.tif'),
+                           scale=2, max_frames=5, master_scale=1.5, output_dng=True,
+                           use_subject_roi=False, use_homography=False,
+                           use_local_align=False, use_noise_weight=False,
+                           rl_sharpen=False, sharpen=0.0, blur_gate=False, sharp_gate=False)
+
+        assert (tmp_path / 'r_1.5x.dng').exists()
+        assert not (tmp_path / 'r_2x.dng').exists()
+        assert (tmp_path / 'r_2x.jpg').exists()
+        jpg = cv2.imread(str(tmp_path / 'r_2x.jpg'))
+        assert jpg is not None
+        mh, mw = captured['shape'][:2]
+        # 2x 画布 -> 1.5x（0.75），允许逐边 1px 取整
+        assert abs(mw - round(jpg.shape[1] * 0.75)) <= 1
+        assert abs(mh - round(jpg.shape[0] * 0.75)) <= 1
+
+
 class TestJpgFallback:
     def test_jpg_burst_falls_back_to_tif(self, tmp_path):
         """JPG 连拍没有相机空间：即使要求 DNG 也回退 TIF，不产出 .dng"""
