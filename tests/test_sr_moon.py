@@ -147,6 +147,19 @@ class TestPsfSigma:
             # 10-90% 宽度 ≈ 2.563σ，允许 15% 误差（离散采样+限幅）
             assert abs(sig - s) < 0.15 * s, f'σ={sig:.2f} 期望 {s}'
 
+    def test_overestimated_radius_still_finds_the_limb(self):
+        """r 被亮晕撑大 20% 时，盘缘落到默认 0.85~1.12r 窗口外，必须能回退重找。
+
+        实测（G100 60mm 月面，盘面 r≈85 但 10% 阈值面积给 104）：旧实现整组
+        返回 nan，lucky 权重全变 nan，输出一张灰图。
+        """
+        g = _disk_image(size=400, r=100, sigma=1.5)
+        sig_ok, edge_ok, _ = sr_moon.estimate_psf_sigma(g, 200, 200, 100)
+        sig_bad, edge_bad, _ = sr_moon.estimate_psf_sigma(g, 200, 200, 120)
+        assert np.isfinite(edge_bad), 'r 高估时不该返回 nan'
+        assert abs(edge_bad - edge_ok) < 0.25 * edge_ok
+        assert abs(sig_bad - 1.5) < 0.3
+
 
 class TestTonemap:
     def test_sky_stays_black_and_subject_anchored(self):
@@ -207,3 +220,24 @@ class TestDarkDominantPreview:
         out = sr_process.render_srgb_preview(img, (eye, 0.0), stretch=True)
         o = out.astype(np.float32) / 255.0
         assert float(o.min()) < 0.02 and float(o.max()) > 0.95
+
+
+def test_registration_outliers_reject_unregistered_frames():
+    """整机滚转 >2° 的帧：平移配准后残差 ≈ 盘内信号 std 的 0.85 倍，必须剔除。
+
+    实测（2026-10-25 月面材料）：对齐帧 0.005–0.012，滚转 10° 的帧 0.040，
+    盘内 std 0.047 —— 阈值 0.5×std 正好把两类分开，同时不误伤"更锐所以残差
+    略大"的帧（0.012 远小于 0.0235）。
+    """
+    rms = [0.0, 0.0061, 0.0072, 0.0121, 0.0405, 0.0398]
+    bad, thr = sr_process.registration_outliers(rms, ref_std=0.047)
+    assert bad == [4, 5]
+    assert thr == pytest.approx(0.0235)
+
+    # 阈值必须随信号起伏缩放（亮度更低的组不能沿用同一个绝对阈值）
+    _, thr_dim = sr_process.registration_outliers(rms, ref_std=0.0047)
+    assert thr_dim == pytest.approx(0.00235)
+
+    # 全黑参考帧不能让阈值为 0（否则 0 残差也会被判成异常）
+    _, thr_flat = sr_process.registration_outliers([0.0], ref_std=0.0)
+    assert thr_flat > 0

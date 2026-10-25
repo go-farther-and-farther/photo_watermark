@@ -235,21 +235,42 @@ def estimate_psf_sigma(gray, cx, cy, r, step=0.01):
         return np.nan, np.nan, 0.0
     lo = bg + 0.1 * (pl - bg)
     hi = bg + 0.9 * (pl - bg)
-    sel = (rs > 0.85) & (rs < 1.12)
-    rr, pp = rs[sel], prof[sel]
 
-    def cross(level):
-        for k in range(len(pp) - 1):
-            if (pp[k] - level) * (pp[k + 1] - level) <= 0 and pp[k] > pp[k + 1]:
-                t = (level - pp[k]) / (pp[k + 1] - pp[k] + 1e-12)
-                return rr[k] + t * (rr[k + 1] - rr[k])
-        return np.nan
+    def edge_in(r_lo, r_hi):
+        """在 [r_lo, r_hi]（单位：传入的 r）窗口里找 10-90% 跨越点，返回边缘宽度(px)"""
+        sel = (rs > r_lo) & (rs < r_hi)
+        rr, pp = rs[sel], prof[sel]
 
-    r10, r90 = cross(lo), cross(hi)
-    w = r10 - r90
-    if not np.isfinite(w) or w <= 0:
+        def cross(level):
+            for k in range(len(pp) - 1):
+                if (pp[k] - level) * (pp[k + 1] - level) <= 0 and pp[k] > pp[k + 1]:
+                    t = (level - pp[k]) / (pp[k + 1] - pp[k] + 1e-12)
+                    return rr[k] + t * (rr[k + 1] - rr[k])
+            return np.nan
+
+        r10, r90 = cross(lo), cross(hi)
+        w = r10 - r90
+        if not np.isfinite(w) or w <= 0:
+            return np.nan
+        return float(w * r)
+
+    edge = edge_in(0.85, 1.12)
+    if not np.isfinite(edge):
+        # 传入的 r 可能被亮晕撑大（10% 阈值面积法，小月盘/强眩光会高估 ~20%），
+        # 盘缘就落在默认窗口外。此时改以"半高位置"为中心再找一次。
+        mid = 0.5 * (pl + bg)
+        wide = (rs > 0.55) & (rs < 1.18)
+        wr, wp = rs[wide], prof[wide]
+        r_mid = np.nan
+        for k in range(len(wp) - 1):
+            if (wp[k] - mid) * (wp[k + 1] - mid) <= 0 and wp[k] > wp[k + 1]:
+                t = (mid - wp[k]) / (wp[k + 1] - wp[k] + 1e-12)
+                r_mid = float(wr[k] + t * (wr[k + 1] - wr[k]))
+                break
+        if np.isfinite(r_mid):
+            edge = edge_in(r_mid - 0.12, r_mid + 0.12)
+    if not np.isfinite(edge):
         return np.nan, np.nan, 0.0
-    edge = w * r
     return float(edge / 2.563), float(edge), float(min(1.0, pl / max(bg, 1e-6) / 20.0))
 
 

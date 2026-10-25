@@ -824,6 +824,19 @@ SUBJECT_MAX_DECODE = 40
 # 见 sr_moon.wavelet_sharpen：RL 只反卷积光学 PSF，中频局部对比靠这一步。
 SUBJECT_WAVELET_GAINS = (0.6, 1.7, 1.4, 1.1)
 SUBJECT_LOCAL_CONTRAST = 0.10
+# 配准质量门：残差 RMS 超过盘内信号 std 的这个倍数，说明这帧没真正对齐
+# （实测：对齐帧 0.13×，整机滚转 ~10° 后平移配准的帧 0.85×）
+REG_RMS_RATIO = 0.5
+
+
+def registration_outliers(rms_list, ref_std, max_ratio=REG_RMS_RATIO):
+    """挑出配准残差过大的帧下标，返回 (下标列表, 阈值)。
+
+    用"盘内信号 std"做归一：残差大但画面本来就更锐的帧也会残差大，
+    所以不能只看绝对 RMS；超过信号起伏的一半就必然是真的没对齐。
+    """
+    thr = max_ratio * max(float(ref_std), 1e-6)
+    return [i for i, r in enumerate(rms_list) if r > thr], thr
 
 
 def process_subject_roi(raw_files, ref_idx, output_path, scale, use_dng, dng_meta,
@@ -906,16 +919,37 @@ def process_subject_roi(raw_files, ref_idx, output_path, scale, use_dng, dng_met
     disk = ((xx - W / 2.0) ** 2 + (yy - W / 2.0) ** 2) <= (0.92 * r_full[ref_i]) ** 2
     sky = ((xx - W / 2.0) ** 2 + (yy - W / 2.0) ** 2) > (1.25 * r_full[ref_i]) ** 2
     M_list = []
+    rms_list = []
     for i in range(len(rois)):
         if i == ref_i:
             M_list.append(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            rms_list.append(0.0)
             continue
         g = rois[i].astype(np.float32).mean(axis=2) / 65535.0
         M, rms, info = sr_moon.register_roi(ref_g, g, mask=disk)
         M_list.append(M)
+        rms_list.append(rms)
         print(f"  {files[i].name}: 位移=({M[0,2]:+.3f},{M[1,2]:+.3f}) "
               f"旋转={info['rot_deg']:+.3f}° 残差RMS={rms:.5f}"
               f"{'' if info['rotated'] else '（旋转未采纳）'}")
+    # 配准质量门：残留残差远大于盘内信号起伏，说明这帧根本没对齐（典型是
+    # 重新取景时整机滚转 >2°，平移模型吃不掉）。这种帧混进平均会把整堆拉糊，
+    # 而 lucky 选帧只看盘缘宽度、看不出错位，所以必须在这里剔。
+    bad, rms_thr = registration_outliers(rms_list, ref_g[disk].std())
+    if bad:
+        print(f"  [剔除] {len(bad)} 帧配准残差过大（>{rms_thr:.4f}，"
+              f"多半是整机转了较大角度）：" + ', '.join(files[i].stem for i in bad))
+        good = [i for i in range(len(files)) if i not in set(bad)]
+        if len(good) < 4:
+            print("  [回退] 可用帧不足 4 帧")
+            return False
+        files = [files[i] for i in good]
+        rois = [rois[i] for i in good]
+        M_list = [M_list[i] for i in good]
+        edges = [edges[i] for i in good]
+        r_full = [r_full[i] for i in good]
+        if ref_i in bad:
+            ref_i = 0
     print(f"  [计时] 配准 {time.time() - t0:.1f}s")
 
     # [5] 主体内光度归一（增益取盘内中位，偏置取天空——整帧估计会被黑背景拉平）
