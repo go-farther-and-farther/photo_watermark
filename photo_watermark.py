@@ -3672,6 +3672,20 @@ def select_paths_gui() -> tuple:
         except Exception as e:  # noqa: BLE001
             notify("打开超分工具失败", str(e), is_error=True)
 
+    def open_blur_tool():
+        """打开清糊片窗口（连拍选帧；rawpy/cv2 依赖重，点开时才导入）"""
+        try:
+            from blur_gui import open_blur_window
+        except ImportError as e:
+            notify("清糊片工具不可用",
+                   "blur_gui 模块加载失败，需安装 rawpy/opencv-python:\n" + str(e),
+                   is_error=True)
+            return
+        try:
+            open_blur_window(root)
+        except Exception as e:  # noqa: BLE001
+            notify("打开清糊片工具失败", str(e), is_error=True)
+
     # ========== 界面布局 ==========
     from tkinter import ttk
 
@@ -3749,6 +3763,13 @@ def select_paths_gui() -> tuple:
                          cursor='hand2', padx=16, pady=5,
                          command=open_exif_viewer)
     btn_exif.pack(side='right')
+    # 清糊片（连拍选帧）：独立窗口，与超分并列
+    btn_blur = tk.Button(title_row, text="🧹 清糊片", font=base_font,
+                         bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',
+                         activeforeground='#ffffff', relief='flat', bd=0,
+                         cursor='hand2', padx=16, pady=5,
+                         command=open_blur_tool)
+    btn_blur.pack(side='right')
     # 多帧超分合成（连拍分组版）：独立窗口，与 EXIF 按钮并列
     btn_sr = tk.Button(title_row, text="🔬 超分", font=base_font,
                        bg='#3d6ea8', fg='#ffffff', activebackground='#4a80bf',

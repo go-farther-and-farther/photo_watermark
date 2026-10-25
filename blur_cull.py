@@ -215,8 +215,12 @@ def group_by_time(frames: Sequence[Frame], gap: float = DEFAULT_GAP) -> list[lis
     return groups
 
 
-def score_frames(frames: Iterable[Frame], exifread_mod=None, verbose: bool = True) -> None:
-    """逐帧解码打分，结果写回 frame.score。"""
+def score_frames(frames: Iterable[Frame], exifread_mod=None, verbose: bool = True,
+                 on_progress=None) -> None:
+    """逐帧解码打分，结果写回 frame.score。
+
+    on_progress(i, total, frame) 用于 GUI 把进度回填到界面（可选）。
+    """
     frames = list(frames)
     total = len(frames)
     for i, f in enumerate(frames, 1):
@@ -231,6 +235,8 @@ def score_frames(frames: Iterable[Frame], exifread_mod=None, verbose: bool = Tru
             f.scored = False
             if verbose:
                 print(f'  [跳过] 解码失败 {f.name}: {exc}', flush=True)
+        if on_progress is not None:
+            on_progress(i, total, f)
         if verbose:
             print(f'  [{i:>3}/{total}] {f.name}  锐度 {f.score:8.0f}', flush=True)
 

@@ -187,6 +187,29 @@ def test_delete_files_hard_removes(tmp_path):
     assert not a.exists() and not b.exists()
 
 
+# ---------- 进度回调（GUI 用） ----------
+
+def test_score_frames_reports_progress(monkeypatch):
+    """GUI 靠 on_progress 回填进度条；回调必须逐帧触发且顺序正确。"""
+    monkeypatch.setattr(bc, "decode_gray", lambda p: np.zeros((8, 8), np.float32))
+    monkeypatch.setattr(bc, "read_meta", lambda p, m=None: {"ts": 0.0, "shutter": "1/250"})
+    monkeypatch.setattr(bc, "sharpness", lambda g: 123.0)
+    frames = [bc.Frame(path=Path(f"a{i}.RW2")) for i in range(3)]
+    seen = []
+    bc.score_frames(frames, verbose=False,
+                    on_progress=lambda i, t, f: seen.append((i, t, f.name)))
+    assert seen == [(1, 3, "a0.RW2"), (2, 3, "a1.RW2"), (3, 3, "a2.RW2")]
+    assert all(f.scored and f.score == 123.0 for f in frames)
+
+
+def test_blur_gui_exposes_window_entry():
+    """主程序按 `from blur_gui import open_blur_window` 懒加载，入口不能被改名。"""
+    pytest.importorskip("tkinter")
+    import blur_gui
+    assert callable(blur_gui.open_blur_window)
+    assert hasattr(blur_gui, "App")
+
+
 # ---------- 报告落盘 ----------
 
 def test_write_csv_and_sheet(tmp_path):
