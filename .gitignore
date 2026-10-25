@@ -75,3 +75,6 @@ sr_gui.ini
 # SR 工具构建与调试产物
 devtests/res_report/
 devtests/_dngdbg/
+
+# 一次性对比分析产物（人工查看用，不入库）
+分析输出/

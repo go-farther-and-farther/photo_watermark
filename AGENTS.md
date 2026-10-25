@@ -32,6 +32,16 @@ git tag -a v2.1.3 -m "v2.1.3 ..." && git push origin v2.1.3
 - 注释、docstring、提交信息一律中文；提交信息写清"改了什么 + 为什么 + 实测数据"
 - 新功能配单测，放在 `tests/`，用合成数据，不依赖真实 RAW
 
+## 先查现成工具，别重复造轮子
+
+- **月亮 / 小主体（超分、堆栈、锐度度量）动手前先读 `devdocs/月面锐度度量.md`**：
+  度量口径、已知坑（交点搜索窗、中文路径、warpAffine 求逆、2x 尺度）、以及每批素材的存档结论。
+- 已有实现，直接 import，缺什么补什么，不要另写平行脚本：
+  `sr_moon.py`（`detect_bright_subject` / `estimate_psf_sigma` / `select_lucky` / `fuse_rois` /
+  `wavelet_sharpen`）、`sr_process.py`（全链路）、`devtests/moon_metrics.py`（ESF/σ/噪声测量）、
+  `devtests/sr_resolution.py`。
+- 每批素材的数字和结论在该批 `说明.md`（`Pictures\raw\SR输出\<批次>\`）。**拿它当基线，别重新推一遍。**
+
 ## 处理用户照片时的安全线
 
 - 删除一律走**回收站**（`blur_cull.delete_files(recycle=True)`），不做永久删除
