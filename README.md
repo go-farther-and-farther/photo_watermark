@@ -230,6 +230,44 @@ python sr_gui.py
 
 详细参数与算法说明见 [docs/super_res/README.md](docs/super_res/README.md)。
 
+### 糊片清理（可选工具）
+
+连拍几十张挑最锐的那几张，剩下的糊片直接删掉：
+
+```bash
+# 只出报告，不删任何文件（默认就是这一步）
+py blur_cull.py "D:\Pictures\raw\109_PANA"
+
+# 只看某张之后拍的（按文件名编号，不含该文件）
+py blur_cull.py "D:\Pictures\raw\109_PANA" --after P1093278.RW2
+
+# 确认报告后真删（进回收站，可恢复；同名 JPG 一起删）
+py blur_cull.py "D:\Pictures\raw\109_PANA" --after P1093278.RW2 --apply
+```
+
+不想敲命令就把文件夹拖到 `清糊片.bat` 上：它先跑一遍报告，问过你再删。
+
+判定规则：同一场景的连拍按 EXIF 时间分组（默认 30 秒内、2 张以上算一组），
+组内以最锐帧为 100%，**相对锐度 < 80% 判糊**、80–90% 只标"软"不删。单张孤立的
+照片没有同场景对照，永不删除。报告与联系表（糊的描红框）落在
+`%TEMP%\blur_cull\<文件夹名>\`。
+
+锐度用 **2×2 合并后**的灰度图算 3×3 拉普拉斯方差：夜景高感时全分辨率的拉普拉斯
+方差会被噪点抬高（实测同一场景 1/10s 与 1/20s 全分辨率差 80%、4× 降采样后只差 3%），
+直接在全分辨率上比会把"噪点最多的那张"误判成最锐。
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--ratio` | 0.80 | 删除线：相对锐度低于它判糊 |
+| `--review` | 0.90 | 软帧上限：低于它只标记不删 |
+| `--gap` | 30 | 同组最大间隔秒数 |
+| `--first` / `--last` | - | 按文件名编号限定处理范围（闭区间） |
+| `--apply` | 关 | 真的删除；默认 dry-run |
+| `--confirm` | 关 | 出完报告后交互确认再删（bat 用这个） |
+| `--hard` | 关 | 永久删除，不进回收站 |
+| `--keep-jpg` | 关 | 保留同名 JPG，不跟着 RAW 一起删 |
+| `--out` | `%TEMP%\blur_cull\<文件夹名>` | 报告输出目录 |
+
 ## 支持的品牌
 
 程序会根据照片EXIF中的品牌自动匹配对应的Logo（相机 + 手机/无人机）：
@@ -471,6 +509,8 @@ photo_watermark/
 │   └── panasonic_logo.jpeg
 ├── assets/fonts/           # 艺术字体（内置 Montserrat-Italic.ttf、PlayfairDisplay-Italic.ttf，均 SIL OFL）
 ├── assets/wordmarks/       # 官方LOGO字标（16品牌透明PNG，wordmark 样式第一行用）
+├── blur_cull.py           # 糊片清理（连拍分组 + 相对锐度，糊的移入回收站）
+├── 清糊片.bat             # 糊片清理的拖拽入口（先出报告再问你要不要删）
 ├── pkg/                   # 打包配置（开发者用）
 │   ├── setup.py
 │   └── pyproject.toml
