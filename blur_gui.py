@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
-"""清糊片窗口：连拍分组 → 组内相对锐度 → 确认后把糊的移入回收站
+"""清糊片窗口：连拍分组 → 组内相对锐度 → 缩略图逐帧确认 → 勾选的移入回收站
 
 作为水印工具（photo_watermark）的子窗口打开；独立运行走 main()。
 逻辑全在 blur_cull.py，这里只做界面与线程调度。
+
+相比首版的改进（2026-10-26）：
+- 扫描解码时显示进度条；
+- 判定结果出来后，糊/软帧在窗口右侧列成缩略图行（后台线程生成），
+  删除前逐帧勾选——软帧默认不勾，想删可以勾上；
+- 「移入回收站」只删勾选的帧。
 """
 import os
 import queue
@@ -21,19 +27,24 @@ BTN_BG = '#3d6ea8'
 BTN_FG = '#ffffff'
 TEXT_BG = '#ffffff'
 
+THUMB_TILE = 150          # 缩略图宽（像素），行高按 3:2 比例约 100
+REVIEW_W = 360            # 右侧确认栏宽
+
 
 class App:
     def __init__(self, win):
         self.win = win
         self.win.title('清糊片 · 连拍选帧')
-        self.win.geometry('820x600')
-        self.win.minsize(700, 480)
+        self.win.geometry('1020x680')
+        self.win.minsize(860, 540)
 
         self.frames = []
         self.groups = []
         self.out_dir = None
         self.q = queue.Queue()
         self.busy = False
+        self._rows = []            # 确认栏行：[{'frame', 'var', 'thumb'}]
+        self._thumbs = {}          # name -> PIL.Image（主线程转 PhotoImage 用）
 
         self.folder = tk.StringVar()
         self.ratio = tk.StringVar(value=f'{bc.DEFAULT_RATIO:.2f}')
@@ -79,7 +90,8 @@ class App:
         tk.Label(opt2, text='只看这张之后', anchor='w').pack(side='left')
         tk.Entry(opt2, textvariable=self.after, width=22).pack(side='left', padx=(4, 4))
         tk.Label(opt2, text='（文件名，如 P1093278.RW2；留空=整个文件夹）').pack(side='left')
-        tk.Checkbutton(opt2, text='同名 JPG 一起删', variable=self.del_sidecar).pack(side='left', padx=(12, 0))
+        tk.Checkbutton(opt2, text='同名 JPG 一起删', variable=self.del_sidecar).pack(side='left',
+                                                                                     padx=(12, 0))
 
         btns = tk.Frame(body)
         btns.pack(fill='x', pady=(10, 8))
@@ -95,17 +107,45 @@ class App:
                                  padx=14, pady=4, cursor='hand2')
         self.btn_del.pack(side='left', padx=(8, 0))
 
-        self.log = tk.Text(body, height=18, wrap='none', bg=TEXT_BG, relief='flat',
+        # 主区：左日志 + 右待删确认（缩略图逐帧勾选）
+        main = tk.Frame(body)
+        main.pack(fill='both', expand=True)
+        self.log = tk.Text(main, height=18, wrap='none', bg=TEXT_BG, relief='flat',
                            font=('Consolas', 9))
-        ys = ttk.Scrollbar(body, orient='vertical', command=self.log.yview)
+        ys = ttk.Scrollbar(main, orient='vertical', command=self.log.yview)
         self.log.configure(yscrollcommand=ys.set)
         self.log.pack(side='left', fill='both', expand=True)
-        ys.pack(side='right', fill='y')
+        ys.pack(side='left', fill='y')
+
+        right = tk.Frame(main)
+        right.pack(side='left', fill='both', expand=False, padx=(10, 0))
+        self.review_title = tk.Label(right, text='待删确认（出报告后列在这里）',
+                                     anchor='w', fg='#555')
+        self.review_title.pack(fill='x')
+        self.canvas = tk.Canvas(right, bg='#f6f8fb', highlightthickness=0, width=REVIEW_W)
+        self.rscroll = ttk.Scrollbar(right, orient='vertical', command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.rscroll.set)
+        self.canvas.pack(side='left', fill='both', expand=True, pady=(4, 0))
+        self.rscroll.pack(side='left', fill='y')
+        self.inner = tk.Frame(self.canvas, bg='#f6f8fb')
+        self._inner_id = self.canvas.create_window((0, 0), window=self.inner,
+                                                   anchor='nw')
+        self.inner.bind('<Configure>', lambda e: self.canvas.configure(
+            scrollregion=self.canvas.bbox('all')))
+        self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfigure(
+            self._inner_id, width=e.width))
+        # 鼠标滚轮滚动确认栏
+        self.canvas.bind('<Enter>', lambda e: self.canvas.bind_all(
+            '<MouseWheel>', lambda ev: self.canvas.yview_scroll(
+                -1 if ev.delta > 0 else 1, 'units')))
+        self.canvas.bind('<Leave>', lambda e: self.canvas.unbind_all('<MouseWheel>'))
 
         bar = tk.Frame(self.win, bg='#eef2f7')
         bar.pack(fill='x')
         tk.Label(bar, textvariable=self.status, anchor='w', bg='#eef2f7',
                  fg='#334').pack(side='left', padx=12, pady=5)
+        self.pbar = ttk.Progressbar(bar, length=220, mode='determinate')
+        self.pbar.pack(side='right', padx=12, pady=4)
 
     # ---------------- 交互 ----------------
     def _browse(self):
@@ -135,13 +175,20 @@ class App:
             return
         if not 0.3 <= ratio <= 1.0:
             messagebox.showwarning('删除线', '删除线请填 0.30 ~ 1.00 之间的数。')
+            return
+        # 修首版遗漏：范围校验弹完警告必须回来，不能带着越界值开扫
+        if not 1 <= gap <= 3600:
+            messagebox.showwarning('组间隔', '组间隔请填 1 ~ 3600 之间的秒数。')
+            return
 
         self.busy = True
         self.btn_scan.config(state='disabled', text='扫描中…')
         self.btn_del.config(state='disabled')
         self._clear()
+        self._clear_review()
+        self.pbar.config(value=0, maximum=100)
         self._write(f'扫描 {folder}')
-        self._write('（逐帧解码 RAW，几十张要一两分钟）')
+        self._write('（逐帧解码 RAW，几十张要一两分钟；右侧出报告后可逐帧确认）')
         threading.Thread(target=self._worker, args=(folder, ratio, gap,
                                                    self.after.get().strip()), daemon=True).start()
 
@@ -171,9 +218,13 @@ class App:
                 kind = msg[0]
                 if kind == 'progress':
                     _, i, total, name = msg
+                    self.pbar.config(maximum=total, value=i)
                     self.status.set(f'解码 {i}/{total}：{name}')
                 elif kind == 'done':
                     self._show_result(*msg[1:])
+                elif kind == 'thumb':                      # 后台缩略图：主线程转 PhotoImage
+                    _, name, pil_img = msg
+                    self._set_thumb(name, pil_img)
                 elif kind == 'error':
                     self._finish()
                     self._write('出错了：\n' + msg[1])
@@ -189,6 +240,7 @@ class App:
     def _show_result(self, frames, groups, out_dir):
         self.frames, self.groups, self.out_dir = frames, groups, out_dir
         self._finish()
+        self.pbar.config(value=0)
         self._clear()
         self._write(f'{len(frames)} 张 RAW，分成 {len(groups)} 组（组内间隔 ≤ '
                     f'{float(self.gap.get()):g}s）')
@@ -203,23 +255,92 @@ class App:
         blur = [f for f in frames if f.decision == bc.DEC_BLUR]
         soft = [f for f in frames if f.decision == bc.DEC_SOFT]
         self._write('')
-        self._write(f'判定：糊 {len(blur)} 张 / 软 {len(soft)} 张（不删）/ '
+        self._write(f'判定：糊 {len(blur)} 张 / 软 {len(soft)} 张（默认不删）/ '
                     f'保留 {len(frames) - len(blur) - len(soft)} 张')
-        if blur:
-            self._write('待删（相对锐度）：')
-            for f in blur:
-                self._write(f'  {f.name}  {f.rel * 100:5.1f}%  {f.shutter}')
-        if soft:
-            self._write('偏软但保留：')
-            for f in soft:
-                self._write(f'  {f.name}  {f.rel * 100:5.1f}%')
         self._write('')
         self._write(f'报告：{out_dir / "糊片报告.csv"}')
         self._write(f'联系表：{out_dir / "糊片报告_联系表.jpg"}')
         self.btn_open.config(state='normal')
-        self.btn_del.config(state='normal' if blur else 'disabled')
-        self.status.set(f'糊 {len(blur)} 张待确认；联系表可以直接打开看' if blur
-                        else '没有判为糊的帧，不用删')
+
+        self._build_review(blur, soft)
+        if blur:
+            self._write('右边已列出糊/软帧：确认勾选后按「移入回收站」，软帧想删自己勾上。')
+            self.btn_del.config(state='normal')
+            self.status.set(f'糊 {len(blur)} 张已勾选待确认；右侧缩略图可逐帧取舍')
+        else:
+            self.btn_del.config(state='disabled')
+            self.status.set('没有判为糊的帧，不用删')
+
+    # ---------------- 待删确认栏 ----------------
+    def _clear_review(self):
+        for w in self.inner.winfo_children():
+            w.destroy()
+        self._rows.clear()
+        self._thumbs.clear()
+        self.review_title.config(text='待删确认（出报告后列在这里）')
+
+    def _build_review(self, blur, soft):
+        self._clear_review()
+        rows = [(f, True) for f in blur] + [(f, False) for f in soft]
+        if not rows:
+            self.review_title.config(text='待删确认（没有糊/软帧）')
+            self._sync_del_btn()
+            return
+        self.review_title.config(text=f'待删确认：糊 {len(blur)}（已勾）+ 软 {len(soft)}（未勾）'
+                                       '——勾谁删谁')
+        for f, checked in rows:
+            var = tk.BooleanVar(value=checked)
+            r = tk.Frame(self.inner, bg='#ffffff', bd=1, relief='solid')
+            r.pack(fill='x', pady=3, padx=4)
+            tk.Checkbutton(r, variable=var, bg='#ffffff').pack(side='left',
+                                                               padx=(4, 0), pady=2)
+            thumb = tk.Label(r, text='…', bg='#dddddd', width=20, height=6)
+            thumb.pack(side='left', padx=6, pady=4)
+            info = tk.Frame(r, bg='#ffffff')
+            info.pack(side='left', fill='x', expand=True, pady=4)
+            tag = '糊' if f.decision == bc.DEC_BLUR else '软'
+            color = '#c22' if tag == '糊' else '#b70'
+            tk.Label(info, text=f'{tag} {f.rel * 100:4.1f}%', fg=color, bg='#ffffff',
+                     font=('Microsoft YaHei UI', 10, 'bold'), anchor='w').pack(fill='x')
+            tk.Label(info, text=f.name, bg='#ffffff', anchor='w',
+                     font=('Consolas', 8)).pack(fill='x')
+            tk.Label(info, text=f'{f.shutter}  ISO {f.iso}', bg='#ffffff', fg='#666',
+                     anchor='w', font=('Microsoft YaHei UI', 8)).pack(fill='x')
+            var.trace_add('write', lambda *_: self._sync_del_btn())
+            self._rows.append({'frame': f, 'var': var, 'thumb': thumb, 'row': r})
+        self._sync_del_btn()
+        # 缩略图后台生成（糊+软才有，通常不多；RAW 解码不能卡界面）
+        threading.Thread(target=self._make_thumbs, args=([f for f, _ in rows],),
+                         daemon=True).start()
+
+    def _make_thumbs(self, frames):
+        from PIL import Image
+        for f in frames:
+            try:
+                t = bc._thumb(f.path, THUMB_TILE)          # BGR ndarray（有侧车则快）
+                img = Image.fromarray(t[..., ::-1].copy())  # BGR->RGB
+                img.thumbnail((THUMB_TILE, THUMB_TILE))
+                self.q.put(('thumb', f.name, img))
+            except Exception:                              # noqa: BLE001
+                pass                                       # 缩略图失败不影响功能
+
+    def _set_thumb(self, name, pil_img):
+        from PIL import ImageTk
+        for row in self._rows:
+            if row['frame'].name == name:
+                row['thumb'].configure(width=0, height=0, image='',
+                                       text='')
+                row['photo'] = ImageTk.PhotoImage(pil_img)
+                row['thumb'].configure(image=row['photo'])
+                return
+
+    def _checked_frames(self):
+        return [r['frame'] for r in self._rows if r['var'].get()]
+
+    def _sync_del_btn(self):
+        n = len(self._checked_frames())
+        self.btn_del.config(text=f'③ 移入回收站（勾选 {n} 张）',
+                            state='normal' if n else 'disabled')
 
     def _open_out(self):
         if not self.out_dir:
@@ -231,12 +352,12 @@ class App:
             os.startfile(str(self.out_dir))                # noqa: S606
 
     def _delete(self):
-        blur = [f for f in self.frames if f.decision == bc.DEC_BLUR]
-        if not blur:
+        picked = self._checked_frames()
+        if not picked:
             return
-        targets = bc.collect_deletions(blur, with_sidecar=self.del_sidecar.get())
+        targets = bc.collect_deletions(picked, with_sidecar=self.del_sidecar.get())
         size = sum(p.stat().st_size for p in targets if p.exists()) / 1024 / 1024
-        msg = (f'把 {len(blur)} 张糊片移入回收站？\n\n'
+        msg = (f'把勾选的 {len(picked)} 张移入回收站？\n\n'
                f'连同同名 JPG 共 {len(targets)} 个文件，约 {size:.0f}MB。\n'
                f'回收站里可以恢复。')
         if not messagebox.askyesno('确认删除', msg):
@@ -248,7 +369,12 @@ class App:
             self._write(f'失败 {len(failed)} 个：')
             for p in failed:
                 self._write(f'  {p.name}')
-        self.btn_del.config(state='disabled')
+        # 从确认栏撤掉已删的行
+        for row in self._rows[:]:
+            if not row['frame'].path.exists():
+                row['row'].destroy()
+                self._rows.remove(row)
+        self._sync_del_btn()
         self.status.set(f'已删 {len(done)} 个；想再筛一遍请重新扫描')
 
 
