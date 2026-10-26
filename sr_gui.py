@@ -166,8 +166,7 @@ class App:
         c = ttk.Checkbutton(f3b, text='出对比图(单帧vs合成)', variable=self.var_compare)
         c.pack(side='left', padx=(14, 2))
         ToolTip(c, '合成完成后自动生成一张双图对比：中位锐度单帧 vs 合成结果，\n'
-                   '同一渲染管线（色调可比），输出到 SR输出 同级的 SR对比图/<批次>/ 目录。\n'
-                   '想看指定位置的细节裁切对比用主界面「📐 四格对比」窗口')
+                   '同一渲染管线（色调可比），输出到 SR输出 同级的 SR对比图/<批次>/ 目录。')
 
         # 第二行：画质增强 + 外部引擎（语义分组，也不再受窗宽裁切）
         f3c = ttk.Frame(self.root); f3c.pack(fill='x', **pad)
