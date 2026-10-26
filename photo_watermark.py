@@ -176,8 +176,18 @@ def get_config_value(section: str, key: str, fallback, value_type: str = 'str'):
     return fallback
 
 
-def parse_color(color_str: str) -> Tuple[int, int, int]:
-    """解析颜色字符串（支持中文）"""
+def parse_color(color_str) -> Tuple[int, int, int]:
+    """解析颜色字符串（支持中文）。
+
+    也接受三元组直通：config.py 的颜色键存的就是 (r, g, b)——exe 在
+    没有配套 ini 的干净目录启动时（朋友拿到单个 exe 的场景），
+    get_config_value 会把 config.py 的元组当默认值传进来，
+    按字符串处理会 AttributeError 直接崩（v2.2.0 打包实测抓到）。"""
+    if isinstance(color_str, (tuple, list)) and len(color_str) == 3:
+        try:
+            return tuple(int(v) for v in color_str)
+        except (TypeError, ValueError):
+            return (0, 0, 0)
     colors = {
         'black': (0, 0, 0), 'white': (255, 255, 255),
         'red': (255, 0, 0), 'green': (0, 128, 0), 'blue': (0, 0, 255),
