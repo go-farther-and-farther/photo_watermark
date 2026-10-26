@@ -96,6 +96,7 @@ class App:
         self._cancel = False
         self._scanning = False      # 取消按钮只对扫描有意义
         self._work = None           # 当前工作线程句柄（关窗确认用）
+        self._dst_auto = True       # 输出目录是自动填的才跟随源文件夹变化
         self._build()
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
         self.root.after(100, self._poll)
@@ -259,13 +260,17 @@ class App:
         p = filedialog.askdirectory(title='选择照片文件夹（RAW/JPG 连拍混放即可）')
         if p:
             self.var_src.set(p)
-            if not self.var_dst.get():
-                self.var_dst.set(str(Path(p) / 'SR输出'))
+            # 默认输出：源文件夹的同级 SR输出\<源文件夹名>\（目录=一次拍摄，
+            # 与用户已有的归档布局一致；比此前"<源>/SR输出"平铺混放更清晰）
+            if self._dst_auto or not self.var_dst.get():
+                self.var_dst.set(str(Path(p).parent / 'SR输出' / Path(p).name))
+                self._dst_auto = True
 
     def _pick_dst(self):
         p = filedialog.askdirectory(title='选择输出文件夹')
         if p:
             self.var_dst.set(p)
+            self._dst_auto = False    # 手选后不再跟随源文件夹重填
 
     def log(self, s):
         self.txt.insert('end', s + '\n')
@@ -549,21 +554,30 @@ class App:
 
 
 class _LiveLog(io.StringIO):
-    """process() 的 stdout 双写：既留缓冲（供"耗时"正则），又实时进 GUI。
+    """process() 的 stdout 三写：缓冲（供"耗时"正则）+ GUI 日志 + 控制台。
 
     - 完成行（不含 \\r）→ 队列 → 日志区实时滚动（此前整段吞进缓冲，
       合成几分钟内界面毫无反馈）；
     - \\r 覆写式进度（"融合: 3/48 块"）→ ('status', ...) → 状态栏单行刷新，
-      不进日志区防刷屏。
+      不进日志区防刷屏；
+    - 全部内容同时写 sys.__stdout__：带控制台的启动方式（py 脚本 / 带控制台
+      的 exe）黑窗口里也能看到合成过程，而不是只有启动日志。
     print 的一次调用可能拆成多次 write，按片段判断即可：\\r 进度总是
     独立片段开头。"""
 
     def __init__(self, q):
         super().__init__()
         self._q = q
+        self._con = sys.__stdout__
 
     def write(self, s):
         super().write(s)
+        if self._con is not None:
+            try:
+                self._con.write(s)
+                self._con.flush()
+            except Exception:                          # noqa: BLE001
+                self._con = None                       # 控制台没了就不再试
         if s.startswith('\r'):
             self._q.put(('status', s.strip() or '…'))
         elif s.strip():
