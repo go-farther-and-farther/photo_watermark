@@ -63,6 +63,36 @@ class TestEstimateShift:
         assert abs(dx) < 0.25 and abs(dy) < 0.25
 
 
+class TestCompareHelpers:
+    """自动对比的辅助函数：输出路径约定 / 中位锐度帧选择"""
+
+    def test_compare_output_path_flat_layout(self, tmp_path):
+        """GUI/CLI 实际产出是平铺布局 SR输出/组01_..._2x.jpg ——对比图绝不能
+        落进 SR输出（LR 整目录扫描），必须镜像到同级 SR对比图/ 下"""
+        jpg = tmp_path / 'SR输出' / '组01_123456_2x.jpg'
+        out = sr_process._compare_output_path(jpg)
+        assert out == tmp_path / 'SR对比图' / '组01_123456_2x' / '组01_123456_2x_对比.png'
+        assert 'SR输出' not in out.parts[1:-1] or out.parts[-3] != 'SR输出'
+
+    def test_compare_output_path_nested_batch_layout(self, tmp_path):
+        """手工归档的批次子目录布局 SR输出/<批次>/xxx_2x.jpg → SR对比图/<批次>/"""
+        jpg = tmp_path / 'SR输出' / '20261025_G100' / '夜景_2x.jpg'
+        out = sr_process._compare_output_path(jpg)
+        assert out == tmp_path / 'SR对比图' / '20261025_G100' / '夜景_2x_对比.png'
+
+    def test_compare_output_path_fallback(self, tmp_path):
+        jpg = tmp_path / '随便' / 'a_2x.jpg'
+        assert sr_process._compare_output_path(jpg) == tmp_path / '随便' / 'a_2x_对比.png'
+
+    def test_median_sharp_frame(self, tmp_path):
+        fs = [tmp_path / f'f{i}.jpg' for i in range(3)]
+        # 分数 [1,3,2]：排序 f0<f2<f1，中位是 f2（分数 2 居中）
+        assert sr_process._median_sharp_frame([1.0, 3.0, 2.0], fs, 0) == fs[2]
+        # 长度失配（选帧截断后未映射）退回参考帧，不越界
+        assert sr_process._median_sharp_frame([1.0, 3.0, 2.0, 9.0], fs, 2) == fs[2]
+        assert sr_process._median_sharp_frame(None, fs, 1) == fs[1]
+
+
 class TestProcess:
     def test_jpg_burst_end_to_end(self, tmp_path):
         burst = tmp_path / "burst"

@@ -102,7 +102,9 @@ def match_tone(crop: np.ndarray, ref: np.ndarray, blur: float = 8.0) -> np.ndarr
     rm = float(np.median(rl))
     if cm > 1.0 and rm > 1.0:
         g = float(np.log(rm / 255.0) / np.log(cm / 255.0))
-        g = float(np.clip(g, 0.4, 2.5))
+        # 常数图会得到 0/0=NaN（如全 128 的 crop 对纯白参考），clip 拦不住
+        # NaN，一路 power 出平台相关的垃圾值——按"无 gamma 可解"退回 1.0
+        g = float(np.clip(g, 0.4, 2.5)) if np.isfinite(g) else 1.0
     else:
         g = 1.0
     out = np.power(np.clip(crop.astype(np.float32) * k / 255.0, 0, 1), g) * 255.0
@@ -204,13 +206,17 @@ def generate_comparisons(ref_path, panel_specs, spots, out_dir,
                 dx = max(0, min(dx, im.shape[1] - cw))
                 dy = max(0, min(dy, im.shape[0] - ch))
                 panels.append((label, match_tone(im[dy:dy + ch, dx:dx + cw], ref_crop)))
-                notes.append(f'{label} {sc:.3f}' + ('（未贴住!）' if sc < ALIGN_WARN else ''))
+                # 纯色/天空等零方差模板会让 TM_CCOEFF_NORMED 给出 NaN，
+                # NaN < 阈值 恒 False 会漏掉警示——用 not(sc >= 阈值) 把 NaN 也算未贴住
+                notes.append(f'{label} {sc:.3f}'
+                             + ('（未贴住!）' if not (sc >= ALIGN_WARN) else ''))
             panels.append((ref_label, ref_crop))
 
             canvas = compose_grid(panels, title_fmt.format(label=name),
                                   font_path=font_path)
-            out = out_dir / f'{prefix}{name}.png'
-            canvas.save(out)
+            target = out_dir / f'{prefix}{name}.png'
+            canvas.save(target)
+            out = target                             # save 成功才置非 None（回调契约）
             outs.append(out)
             if verbose:
                 print(f'[{i}/{total}] {out.name}  [{", ".join(notes)}]', flush=True)

@@ -390,13 +390,6 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
         # 白点以上 0.2% 像素高出 26%，再宽的软肩也压不进 8bit——2026-10-26
         # 与 LR 导出消融实测：P99.5→P99.9 把死白比例 3.1%→0.2%（LR 自身 1.4%）
         hi = float(np.percentile(luma, 99.9))
-        lmax = float(luma.max())
-        # 有真实亮部内容的场景，白点还要看向内容最大值：只锚 P99.9 会让
-        # 0.1% 的亮部（路灯/光晕）整体骑在 237-253，比 LR 的 200-240 过曝
-        # 一档（2026-10-26 与 LR 导出对照实测，用户判定"还是过曝"）。
-        # 上浮到 0.97×最大值，让内容顶部落到 ~240 以下；封顶 1.3×P99.9
-        # 防止"暗场景里一盏小灯"把白点拉太高、整图压黑。
-        hi = max(hi, min(0.97 * lmax, 1.3 * hi)) if hi > 0 else hi
         if hi > 0 and med < 0.02 * hi:
             # 黑主导画面（月亮/行星/星空/深空）：99% 像素是黑天空。全帧 0.5/99.5
             # 定标会把白点落在天空上（P99.5 仍是天空），主体被拉顶成白饼
@@ -417,6 +410,15 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
                 out = _stretch_soft_shoulder(out, 0.0, hi)
         else:
             lo = float(np.percentile(luma, 0.5))
+            # 有真实亮部内容的场景，白点还要看向内容最大值：只锚 P99.9 会让
+            # 0.1% 的亮部（路灯/光晕）整体骑在 237-253，比 LR 的 200-240 过曝
+            # 一档（2026-10-26 与 LR 导出对照实测，用户判定"还是过曝"）。
+            # 上浮到 0.97×最大值，让内容顶部落到 ~240 以下；封顶 1.3×P99.9
+            # 防止"暗场景里一盏小灯"把白点拉太高、整图压黑。
+            # 只作用于普通场景分支：黑主导分支（月亮/星空）锚 lmax 会让
+            # 单个星点把整幅压黑，保持原口径。
+            if hi > 0:
+                hi = max(hi, min(0.97 * float(luma.max()), 1.3 * hi))
             # 大面积亮部（白天天空/白墙）：P99.5 会落在亮部内部，直接按它定白点
             # 会把亮部顶成纯白（2026-10-18 实测：24mm 白天组天空 73% 像素 ≥250，
             # 而 DNG 里天空峰值只有 0.90）。判据不是"亮部多"而是"顶部是个平台"：
@@ -1594,6 +1596,22 @@ def load_subifd_rgb(dng_path):
     raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
 
 
+def _gamma_autostretch(img01):
+    """JPG 组预览口径：gamma 2.2 + 亮度 P0.5–P99.9 拉伸（含 v4 白点锚定）+ 软肩
+
+    render_srgb_preview 的拉伸段同源（三通道共用一组 lo/hi，逐通道会掰歪
+    色度）；成品路径与自动对比的单帧面板必须走同一函数，否则两面板白点
+    口径不一致、色调不可比。"""
+    out = np.power(np.clip(np.asarray(img01), 0, 1), 1.0 / 2.2)
+    luma = (out[:, :, 0] * 0.2126 + out[:, :, 1] * 0.7152
+            + out[:, :, 2] * 0.0722)
+    lo = float(np.percentile(luma, 0.5))
+    hi = float(np.percentile(luma, 99.9))
+    if hi > 0:
+        hi = max(hi, min(0.97 * float(luma.max()), 1.3 * hi))
+    return _stretch_soft_shoulder(out, lo, hi)
+
+
 def _master_output_size(w, h, scale, master_scale):
     """母版输出尺寸与倍率：master_scale < scale 时按比例缩小，否则等于输出。
 
@@ -1618,11 +1636,18 @@ def _median_sharp_frame(sharp_scores, raw_files, ref_idx):
 
 
 def _compare_output_path(jpg_path):
-    """对比图输出路径：SR输出/<批次>/ 下的成品 → 同级 SR对比图/<批次>/ 镜像目录。
+    """对比图输出路径：SR输出 下的成品 → 同级 SR对比图/ 镜像目录。
 
     SR输出 会被 LR 整目录扫描，对比图/预览图不能放进去（约定见
-    devdocs/2026-10-26 交接）。不在 SR输出 结构下时退到与 JPG 同目录。"""
+    devdocs/2026-10-26 交接）。两种布局都要接住：
+    - GUI/CLI 实际产出的平铺布局  <SR输出>/组01_..._2x.jpg
+      → <SR输出 同级>/SR对比图/<成品名>/<成品名>_对比.png
+    - 手工归档的批次子目录布局    <SR输出>/<批次>/xxx_2x.jpg
+      → <SR输出 同级>/SR对比图/<批次>/xxx_2x_对比.png
+    不在 SR输出 结构下时退到与 JPG 同目录。"""
     p = Path(jpg_path)
+    if p.parent.name == 'SR输出':
+        return p.parent.parent / 'SR对比图' / p.stem / f'{p.stem}_对比.png'
     if p.parent.parent.name == 'SR输出':
         return p.parent.parent.parent / 'SR对比图' / p.parent.name / f'{p.stem}_对比.png'
     return p.parent / f'{p.stem}_对比.png'
@@ -1632,8 +1657,8 @@ def _render_compare(single_rgb, composite_rgb, labels, out_png, long_side=2200):
     """双图对比画布：单帧（同管线渲染）与合成成品整幅并排。
 
     两面板各自缩到 long_side 宽——内容尺度一致，可直接比噪声/锐度；
-    细节裁切的定点对比用「📐 四格对比」窗口（quad_gui），这里要的是免操作。
-    single_rgb/composite_rgb 均 RGB u8，尺寸可以不同（各自缩放）。"""
+    定点细节裁切对比用 quad_compare 模块的 CLI（--ref/--panel/--spot），
+    这里要的是免操作。single_rgb/composite_rgb 均 RGB u8，尺寸可以不同（各自缩放）。"""
     import quad_compare
     h, w = composite_rgb.shape[:2]
     cw = min(long_side, w)
@@ -1720,6 +1745,11 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
         raw_files, shifts, ref_idx, max_frames, max_shift,
         sharp=sharp_scores, sharp_gate=sharp_gate,
     )
+    # select_best_frames 会缩短 raw_files 但不回传筛选后的锐度分——
+    # 按原序索引映射回去，否则长度失配成常态（topk 截断必触发），
+    # 自动对比的"中位锐度帧"就永远退化成参考帧、名不副实
+    if sharp_scores is not None and len(sharp_scores) != len(raw_files):
+        sharp_scores = [sharp_scores[i] for i in selected_indices]
     # 门控豁免参考帧，但重建不能锚在糊帧上（糊参考让所有帧的残差失真）：
     # 参考帧得分低于门限时，在保留帧里重选参考并重新预对齐。
     if (sharp_gate and sharp_scores is not None and ref_score is not None
@@ -1907,19 +1937,23 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
 
         if compare_out:
             _tc = time.time()
-            med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
-            print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
-            # 放大到合成尺寸再渲染会造 ~900MB 的 float32 中间图；改为原生解码、
-            # 同一色彩变换与渲染口径，交由 _render_compare 统一缩放（内容尺度一致）
-            single = read_raw_camera_linear(med).astype(np.float32)
-            single_prev = render_srgb_preview(single, transform, stretch=True)
-            del single
-            cmp_png = _render_compare(
-                single_prev, preview,
-                (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
-                 f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
-                _compare_output_path(jpg_path), compare_long_side)
-            print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
+            try:
+                med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
+                print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
+                # 放大到合成尺寸再渲染会造 ~900MB 的 float32 中间图；改为原生解码、
+                # 同一色彩变换与渲染口径，交由 _render_compare 统一缩放（内容尺度一致）
+                single = read_raw_camera_linear(med).astype(np.float32)
+                single_prev = render_srgb_preview(single, transform, stretch=True)
+                del single
+                cmp_png = _render_compare(
+                    single_prev, preview,
+                    (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
+                     f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
+                    _compare_output_path(jpg_path), compare_long_side)
+                print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
+            except Exception as exc:                      # noqa: BLE001
+                # 成品已落盘，对比图失败不该让整组被判失败
+                print(f"  对比: 生成失败（成品不受影响）: {exc}")
 
         elapsed = time.time() - t0
         print(f"\n{'=' * 60}")
@@ -1936,14 +1970,9 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
     if use_denoise:
         sr_result = denoise(sr_result, strength=denoise_strength)
 
-    # gamma + 自动亮度：按亮度 0.5–99.5 分位拉伸，三通道共用一组 lo/hi
-    # （逐通道拉伸会掰歪色度，见 render_srgb_preview 同名注释），高光软肩不硬切
-    sr_result = np.clip(sr_result, 0, 1)
-    sr_result = np.power(sr_result, 1.0 / 2.2)
-    _luma = (sr_result[:, :, 0] * 0.2126 + sr_result[:, :, 1] * 0.7152
-             + sr_result[:, :, 2] * 0.0722)
-    sr_result = _stretch_soft_shoulder(
-        sr_result, float(np.percentile(_luma, 0.5)), float(np.percentile(_luma, 99.9)))
+    # gamma + 自动亮度：与 render_srgb_preview 同口径（亮度分位拉伸 + 白点
+    # 锚定 + 软肩），抽成 _gamma_autostretch 供自动对比单帧共用
+    sr_result = _gamma_autostretch(sr_result)
 
     # 从参考帧读取 EXIF
     exif_data = {}
@@ -2057,23 +2086,22 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
 
     if compare_out:
         _tc = time.time()
-        med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
-        print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
-        # 与重建输入同一解码 + 同一 gamma/拉伸/软肩口径（不锐化——对比的是
-        # "没有 SR 时你手上有什么"）
-        single = np.power(np.clip(read_raw_full(med).astype(np.float32), 0, 1), 1.0 / 2.2)
-        _lu = (single[:, :, 0] * 0.2126 + single[:, :, 1] * 0.7152
-               + single[:, :, 2] * 0.0722)
-        single = _stretch_soft_shoulder(single, float(np.percentile(_lu, 0.5)),
-                                        float(np.percentile(_lu, 99.5)))
-        single_u8 = (np.clip(single, 0, 1) * 255 + 0.5).astype(np.uint8)
-        del single
-        cmp_png = _render_compare(
-            single_u8, (np.clip(sr_result, 0, 1) * 255 + 0.5).astype(np.uint8),
-            (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
-             f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
-            _compare_output_path(jpg_path), compare_long_side)
-        print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
+        try:
+            med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
+            print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
+            # 与重建输入同一解码 + _gamma_autostretch 同一拉伸口径（不锐化——
+            # 对比的是"没有 SR 时你手上有什么"）
+            single_u8 = (np.clip(_gamma_autostretch(read_raw_full(med)), 0, 1)
+                         * 255 + 0.5).astype(np.uint8)
+            cmp_png = _render_compare(
+                single_u8, (np.clip(sr_result, 0, 1) * 255 + 0.5).astype(np.uint8),
+                (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
+                 f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
+                _compare_output_path(jpg_path), compare_long_side)
+            print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
+        except Exception as exc:                          # noqa: BLE001
+            # 成品已落盘，对比图失败不该让整组被判失败
+            print(f"  对比: 生成失败（成品不受影响）: {exc}")
 
     elapsed = time.time() - t0
     sr_h, sr_w = sr_result.shape[:2]

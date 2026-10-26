@@ -126,6 +126,17 @@ class TestComposeGrid:
             compose_grid([('a', _texture(80, 100, seed=1)), ('b', _texture(90, 100, seed=2))])
 
 
+class TestMatchToneEdge:
+    def test_constant_crop_no_nan(self):
+        """常数裁块对纯白参考：gamma 拟合是 0/0=NaN，必须退回 g=1 而不是
+        输出平台相关的垃圾值（NaN clip 不掉，astype(uint8) 结果不定）"""
+        ref = np.full((80, 100, 3), 255, np.uint8)
+        crop = np.full((80, 100, 3), 128, np.uint8)
+        fixed = match_tone(crop, ref)
+        assert fixed.dtype == np.uint8 and np.isfinite(fixed.astype(np.float64)).all()
+        assert fixed.shape == crop.shape
+
+
 class TestGenerateComparisons:
     def test_end_to_end(self, tmp_path):
         ref_p, alt_p = _setup_pair(tmp_path)
@@ -158,6 +169,19 @@ class TestGenerateComparisons:
             [('好点', 0.5, 0.5), ('坏点', 5.0, 0.5)],    # 坏点会被钳回边界，仍应出图
             tmp_path / 'out3', crop_wh=(240, 160), verbose=False)
         assert len(outs) == 2
+
+    def test_failed_spot_reports_none_to_progress(self, tmp_path):
+        """存盘失败（点名含 Windows 非法字符 ?）时 on_progress 必须收到 None，
+        且整批继续——契约见 docstring"""
+        ref_p, alt_p = _setup_pair(tmp_path)
+        seen = []
+        outs = generate_comparisons(
+            ref_p, [('单帧', alt_p)], [('非法?名', 0.5, 0.5), ('正常', 0.5, 0.5)],
+            tmp_path / 'out_none', crop_wh=(240, 160), verbose=False,
+            on_progress=lambda i, t, n, p: seen.append((n, p)))
+        assert len(outs) == 1 and outs[0].name == '对比_四格_正常.png'
+        names = {n: p for n, p in seen}
+        assert names['非法?名'] is None and names['正常'] is not None
 
     def test_panel_smaller_than_crop_errors(self, tmp_path):
         ref_p, _ = _setup_pair(tmp_path)
