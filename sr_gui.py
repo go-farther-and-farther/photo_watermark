@@ -155,14 +155,21 @@ class App:
         c.pack(side='left', padx=2)
         ToolTip(c, '输出类似"数码底片"的 DNG：白平衡、色温、镜头矫正全部留到 Lightroom 里随便调。\n'
                    'JPG 素材的组不支持，自动改出 TIF')
-        # 1.5x 母版：4×6 -> 6×9 档，2x JPG 不变；DNG 模式输出 1.5x 线性 DNG，
-        # 非 DNG 模式输出 1.5x 压缩 TIF。高像素机身默认开（180MP 的 2x 母版太大）
-        self.var_master = tk.BooleanVar(value=True)
-        c = ttk.Checkbutton(f3b, text='1.5x母版(6×9)', variable=self.var_master)
-        c.pack(side='left', padx=6)
-        ToolTip(c, '母版按 1.5 倍输出（4×6 照片 → 6×9 档，体积约为 2x 的 56%）；\n'
-                   'DNG 底片模式下是 1.5x 线性 DNG（可调色温），否则是 16bit 压缩 TIF。\n'
-                   '2x JPG 始终按全尺寸输出，分享/查看用母版看 DNG/TIF')
+        # 母版倍率：融合始终按 2x 超采样（亚像素位移落在 2x 网格的不同位置，
+        # 这是降噪/去锯齿的来源），母版再按此倍率线性域降采样省空间——
+        # 天气/镜头限制实际分辨率时，2x 母版纯属浪费磁盘。2.0=不缩（全尺寸）
+        self.var_master = tk.StringVar(value='1.5')
+        c = ttk.Label(f3b, text='母版倍率')
+        c.pack(side='left', padx=(6, 0))
+        sb = ttk.Spinbox(f3b, from_=1.0, to=2.0, increment=0.1, width=4,
+                         textvariable=self.var_master)
+        sb.pack(side='left', padx=(2, 0))
+        ToolTip(sb, '融合固定按 2x 超采样，母版按此倍率在线性域降采样（1.0–2.0）。\n'
+                    '1.5 = 4×6 照片出 6×9 档，体积约为 2x 的 56%；被天气/镜头限制\n'
+                    '实际分辨率时降到 1.2–1.4 更省；2.0 = 不缩（全尺寸母版）。\n'
+                    'DNG 底片模式下母版是线性 DNG（可调色温），否则是 16bit 压缩 TIF。\n'
+                    '2x JPG 始终按全尺寸输出，分享/查看用母版看 DNG/TIF')
+        tk.Label(f3b, text='x', foreground='#555').pack(side='left')
         c = ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif)
         c.pack(side='left', padx=2)
         ToolTip(c, '额外保存一份全尺寸 16bit 无损 TIF（不压缩，体积很大，适合打印/精修）')
@@ -406,7 +413,18 @@ class App:
             messagebox.showerror('参数错误', '倍率 / 帧数上限 / 锐化 / 线程数必须是数字')
             return
         use_dng = self.var_dng.get()
-        master = 1.5 if self.var_master.get() else None
+        try:
+            master_v = float(self.var_master.get())
+        except (ValueError, tk.TclError):
+            messagebox.showerror('参数错误', '母版倍率必须是 1.0 ~ 2.0 之间的数字')
+            return
+        if not 1.0 <= master_v <= 2.0:
+            messagebox.showerror('参数错误', '母版倍率请在 1.0 ~ 2.0 之间（2.0 = 不缩的全尺寸母版）')
+            return
+        # 2.0 == 输出倍率：process 视为不缩母版；命名标签与 process 的
+        # f'{ms:g}x' 口径一致（1.5→'1.5x'、1.2→'1.2x'、2.0 走全尺寸分支）
+        master = None if master_v >= scale else master_v
+        master_lbl = f'{master_v:g}'
         deghost = self.var_deghost.get()
         keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
@@ -444,7 +462,8 @@ class App:
                     fp = group_fingerprint(v.files)
                     tstr = datetime.datetime.fromtimestamp(v.start_time).strftime('%H%M%S') \
                         if v.start_time else f'{gi:02d}0000'
-                    base = self._unique_base(dst, tstr, gi, scale, master, use_dng)
+                    base = self._unique_base(dst, tstr, gi, scale,
+                                             master_lbl if master else None, use_dng)
                     self.q.put(f'[{k}/{total}] 组{gi:02d} {len(v.files)}帧: 合成中…')
                     buf = io_log()
                     try:
@@ -476,8 +495,8 @@ class App:
                     kept_master = None
                     if master:
                         # DNG 组出 .dng，JPG 组回退 .tif：按实际存在取
-                        cands = [Path(f'{base}_{master}x.dng'),
-                                 Path(f'{base}_{master}x.tif')]
+                        cands = [Path(f'{base}_{master_lbl}x.dng'),
+                                 Path(f'{base}_{master_lbl}x.tif')]
                         kept_master = next((p for p in cands if p.exists()), None)
                     elif use_dng:
                         p = Path(f'{base}_{scale}x.dng')

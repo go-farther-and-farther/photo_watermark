@@ -269,11 +269,13 @@ class TestMasterOutputSize:
 
 
 class TestDngMasterScale:
-    def test_dng_master_is_15x_and_jpg_stays_2x(self, tmp_path, monkeypatch):
-        """DNG 模式也必须遵守 master_scale：母版 1.5x，JPG 仍 2x。
+    @pytest.mark.parametrize('ms', [1.5, 1.2])
+    def test_dng_master_scale_and_jpg_stays_2x(self, tmp_path, monkeypatch, ms):
+        """DNG 模式也必须遵守 master_scale：母版按任意 1.0~2.0 倍率缩，JPG 仍 2x。
 
         用 JPG 连拍模拟 RAW 组（把 .jpg 临时算作 RAW 扩展名），
-        只验证输出分支/尺寸/命名，不真写 DNG。
+        只验证输出分支/尺寸/命名，不真写 DNG。命名口径 f'{ms:g}x'
+        （1.5→'1.5x'、1.2→'1.2x'，GUI 侧 _unique_base 必须同款）。
         """
         sys.path.insert(0, str(PROJECT_ROOT / 'tests'))
         from test_sr import _base_image, _warp
@@ -307,20 +309,20 @@ class TestDngMasterScale:
         monkeypatch.setattr(sr_process, 'write_linear_dng', fake_write)
 
         sr_process.process(files=list(files), output_path=str(tmp_path / 'r.tif'),
-                           scale=2, max_frames=5, master_scale=1.5, output_dng=True,
+                           scale=2, max_frames=5, master_scale=ms, output_dng=True,
                            use_subject_roi=False, use_homography=False,
                            use_local_align=False, use_noise_weight=False,
                            rl_sharpen=False, sharpen=0.0, blur_gate=False, sharp_gate=False)
 
-        assert (tmp_path / 'r_1.5x.dng').exists()
+        assert (tmp_path / f'r_{ms:g}x.dng').exists()
         assert not (tmp_path / 'r_2x.dng').exists()
         assert (tmp_path / 'r_2x.jpg').exists()
         jpg = cv2.imread(str(tmp_path / 'r_2x.jpg'))
         assert jpg is not None
         mh, mw = captured['shape'][:2]
-        # 2x 画布 -> 1.5x（0.75），允许逐边 1px 取整
-        assert abs(mw - round(jpg.shape[1] * 0.75)) <= 1
-        assert abs(mh - round(jpg.shape[0] * 0.75)) <= 1
+        # 2x 画布 -> ms 倍（ms/2），允许逐边 1px 取整
+        assert abs(mw - round(jpg.shape[1] * ms / 2)) <= 1
+        assert abs(mh - round(jpg.shape[0] * ms / 2)) <= 1
 
 
 class TestJpgFallback:
