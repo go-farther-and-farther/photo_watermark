@@ -230,30 +230,30 @@ DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT 
 DEFAULT_PREVIEW_PHOTO = get_config_value('基础设置', '默认预览照片', DEFAULT_PREVIEW_PHOTO if 'DEFAULT_PREVIEW_PHOTO' in dir() else '')
 
 # 文字模板
-TEMPLATE_LINE1 = get_config_value('文字模板', '第一行格式', '{相机}')
-TEMPLATE_LINE2 = get_config_value('文字模板', '第二行格式', '{镜头}')
-TEMPLATE_PARAMS = get_config_value('文字模板', '右侧参数格式', '{焦距} {光圈} {快门} {ISO}')
-TEMPLATE_DATE = get_config_value('文字模板', '右侧日期格式', '{日期}')
-TEMPLATE_TRANSPARENT = get_config_value('文字模板', '半透明格式', '{相机} | {焦距} {光圈} {快门} {ISO}')
-TEMPLATE_BORDER = get_config_value('文字模板', '边框格式', '{焦距} {光圈} {快门} {ISO} | {日期}')
-TEMPLATE_BLUR = get_config_value('文字模板', '模糊格式', '{焦距} {光圈} {快门} {ISO}')
-TEMPLATE_BLUR_LINE2 = get_config_value('文字模板', '模糊第二行格式', '{日期}')
-TEMPLATE_ART = get_config_value('文字模板', '艺术格式', '{相机}')
-TEMPLATE_ART_PARAMS = get_config_value('文字模板', '艺术参数格式', '{焦距} {光圈} {快门} {ISO}')
+TEMPLATE_LINE1 = get_config_value('文字模板', '第一行格式', TEMPLATE_LINE1 if 'TEMPLATE_LINE1' in dir() else '{相机}')
+TEMPLATE_LINE2 = get_config_value('文字模板', '第二行格式', TEMPLATE_LINE2 if 'TEMPLATE_LINE2' in dir() else '{镜头}')
+TEMPLATE_PARAMS = get_config_value('文字模板', '右侧参数格式', TEMPLATE_PARAMS if 'TEMPLATE_PARAMS' in dir() else '{焦距} {光圈} {快门} {ISO}')
+TEMPLATE_DATE = get_config_value('文字模板', '右侧日期格式', TEMPLATE_DATE if 'TEMPLATE_DATE' in dir() else '{日期}')
+TEMPLATE_TRANSPARENT = get_config_value('文字模板', '半透明格式', TEMPLATE_TRANSPARENT if 'TEMPLATE_TRANSPARENT' in dir() else '{相机} | {焦距} {光圈} {快门} {ISO}')
+TEMPLATE_BORDER = get_config_value('文字模板', '边框格式', TEMPLATE_BORDER if 'TEMPLATE_BORDER' in dir() else '{焦距} {光圈} {快门} {ISO} | {日期}')
+TEMPLATE_BLUR = get_config_value('文字模板', '模糊格式', TEMPLATE_BLUR if 'TEMPLATE_BLUR' in dir() else '{焦距} {光圈} {快门} {ISO}')
+TEMPLATE_BLUR_LINE2 = get_config_value('文字模板', '模糊第二行格式', TEMPLATE_BLUR_LINE2 if 'TEMPLATE_BLUR_LINE2' in dir() else '{日期}')
+TEMPLATE_ART = get_config_value('文字模板', '艺术格式', TEMPLATE_ART if 'TEMPLATE_ART' in dir() else '{相机}')
+TEMPLATE_ART_PARAMS = get_config_value('文字模板', '艺术参数格式', TEMPLATE_ART_PARAMS if 'TEMPLATE_ART_PARAMS' in dir() else '{焦距} {光圈} {快门} {ISO}')
 
 # 字体设置
-FONT_PATH = get_config_value('字体设置', '字体路径', '')
+FONT_PATH = get_config_value('字体设置', '字体路径', FONT_PATH if 'FONT_PATH' in dir() else '')
 
 # 颜色设置
-COLOR_BORDER = parse_color(get_config_value('颜色设置', '白条背景', '白色'))
-COLOR_CAMERA = parse_color(get_config_value('颜色设置', '白条相机颜色', '30,30,30'))
-COLOR_LENS = parse_color(get_config_value('颜色设置', '白条镜头颜色', '120,120,120'))
-COLOR_PARAMS = parse_color(get_config_value('颜色设置', '白条参数颜色', '30,30,30'))
-COLOR_DATE = parse_color(get_config_value('颜色设置', '白条日期颜色', '100,100,100'))
-BLUR_TEXT_COLOR = parse_color(get_config_value('颜色设置', '模糊文字颜色', '白色'))
+COLOR_BORDER = parse_color(get_config_value('颜色设置', '白条背景', COLOR_BORDER if 'COLOR_BORDER' in dir() else '白色'))
+COLOR_CAMERA = parse_color(get_config_value('颜色设置', '白条相机颜色', COLOR_CAMERA if 'COLOR_CAMERA' in dir() else '30,30,30'))
+COLOR_LENS = parse_color(get_config_value('颜色设置', '白条镜头颜色', COLOR_LENS if 'COLOR_LENS' in dir() else '120,120,120'))
+COLOR_PARAMS = parse_color(get_config_value('颜色设置', '白条参数颜色', COLOR_PARAMS if 'COLOR_PARAMS' in dir() else '30,30,30'))
+COLOR_DATE = parse_color(get_config_value('颜色设置', '白条日期颜色', COLOR_DATE if 'COLOR_DATE' in dir() else '100,100,100'))
+BLUR_TEXT_COLOR = parse_color(get_config_value('颜色设置', '模糊文字颜色', BLUR_TEXT_COLOR if 'BLUR_TEXT_COLOR' in dir() else '白色'))
 
 # 白条边框垂直对齐
-STRIP_VALIGN = get_config_value('白条边框', '垂直对齐', '中')
+STRIP_VALIGN = get_config_value('白条边框', '垂直对齐', STRIP_VALIGN if 'STRIP_VALIGN' in dir() else '中')
 
 # 白条边框样式
 BORDER_HEIGHT_RATIO = get_config_value('白条边框', '边框高度', BORDER_HEIGHT_RATIO if 'BORDER_HEIGHT_RATIO' in dir() else 0.08, 'float')
@@ -270,8 +270,8 @@ TRANSPARENT_FONT_RATIO = get_config_value('半透明水印', '字体大小', TRA
 
 # 纯色边框样式（颜色键统一在 [颜色设置]；旧模板 [纯色边框] 的键
 # 由 load_ini_config 在加载时提升过来，见其中的迁移注释）
-BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', '黑色'))
-BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', '白色'))
+BORDER_FRAME_COLOR = parse_color(get_config_value('颜色设置', '边框颜色', BORDER_FRAME_COLOR if 'BORDER_FRAME_COLOR' in dir() else '黑色'))
+BORDER_TEXT_COLOR = parse_color(get_config_value('颜色设置', '边框文字颜色', BORDER_TEXT_COLOR if 'BORDER_TEXT_COLOR' in dir() else '白色'))
 BORDER_SIDE_RATIO = get_config_value('纯色边框', '边框宽度', BORDER_SIDE_RATIO if 'BORDER_SIDE_RATIO' in dir() else 0.04, 'float')
 BORDER_BOTTOM_RATIO = get_config_value('纯色边框', '底部宽度', BORDER_BOTTOM_RATIO if 'BORDER_BOTTOM_RATIO' in dir() else 0.08, 'float')
 
@@ -282,16 +282,16 @@ BLUR_CORNER_RADIUS = get_config_value('模糊边框', '圆角大小', BLUR_CORNE
 BLUR_TEXT_SHADOW = get_config_value('模糊边框', '文字阴影', BLUR_TEXT_SHADOW if 'BLUR_TEXT_SHADOW' in dir() else True, 'bool')
 
 # 艺术字体样式（art）：品牌艺术字 + 参数，叠加在照片底部（无边框）
-ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', '')  # 留空=内置 Montserrat Italic
-ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', 0.028, 'float')
-ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', 0.015, 'float')
-ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', '白色'))
-ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', True, 'bool')
+ART_FONT_PATH = get_config_value('艺术字体', '艺术字体路径', ART_FONT_PATH if 'ART_FONT_PATH' in dir() else '')  # 留空=内置 Montserrat Italic
+ART_FONT_RATIO = get_config_value('艺术字体', '字体大小', ART_FONT_RATIO if 'ART_FONT_RATIO' in dir() else 0.028, 'float')
+ART_PARAMS_RATIO = get_config_value('艺术字体', '参数字体大小', ART_PARAMS_RATIO if 'ART_PARAMS_RATIO' in dir() else 0.015, 'float')
+ART_TEXT_COLOR = parse_color(get_config_value('艺术字体', '文字颜色', ART_TEXT_COLOR if 'ART_TEXT_COLOR' in dir() else '白色'))
+ART_TEXT_SHADOW = get_config_value('艺术字体', '文字阴影', ART_TEXT_SHADOW if 'ART_TEXT_SHADOW' in dir() else True, 'bool')
 
 # 官方LOGO字标样式（wordmark）：品牌官方字标图 + 机型 + 参数，叠加照片底部（无边框）
-WORDMARK_RATIO = get_config_value('官方字标', '字标大小', 0.04, 'float')
-WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', '白色'))
-WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', True, 'bool')
+WORDMARK_RATIO = get_config_value('官方字标', '字标大小', WORDMARK_RATIO if 'WORDMARK_RATIO' in dir() else 0.04, 'float')
+WORDMARK_TEXT_COLOR = parse_color(get_config_value('官方字标', '文字颜色', WORDMARK_TEXT_COLOR if 'WORDMARK_TEXT_COLOR' in dir() else '白色'))
+WORDMARK_TEXT_SHADOW = get_config_value('官方字标', '文字阴影', WORDMARK_TEXT_SHADOW if 'WORDMARK_TEXT_SHADOW' in dir() else True, 'bool')
 
 # 压缩/转换设置（「无水印(仅压缩)」样式；最大边长对所有样式生效）
 COMPRESS_MAX_EDGE = get_config_value('压缩设置', '最大边长', COMPRESS_MAX_EDGE if 'COMPRESS_MAX_EDGE' in dir() else 0, 'int')
@@ -305,37 +305,21 @@ PORTRAIT_STYLE = get_config_value('智能样式', '竖版样式', PORTRAIT_STYLE
 SQUARE_STYLE = get_config_value('智能样式', '方形样式', SQUARE_STYLE if 'SQUARE_STYLE' in dir() else 'transparent')
 
 # 调色模板（作用于照片本体；「原图」=关闭，强度 0-100）
-GRADE_TEMPLATE = get_config_value('基础设置', '调色模板', '原图')
-GRADE_STRENGTH = get_config_value('基础设置', '调色强度', 100, 'int')
+GRADE_TEMPLATE = get_config_value('基础设置', '调色模板', GRADE_TEMPLATE if 'GRADE_TEMPLATE' in dir() else '原图')
+GRADE_STRENGTH = get_config_value('基础设置', '调色强度', GRADE_STRENGTH if 'GRADE_STRENGTH' in dir() else 100, 'int')
 GRADE_TEMPLATES = color_grade.load_templates(_ini_config)
 
 # 确保必要变量存在
 if 'DEFAULT_LOGO' not in dir():
     DEFAULT_LOGO = ''
-if 'DEFAULT_TEXT' not in dir():
-    DEFAULT_TEXT = ''
 if 'LOGO_PARAMS_SPACING_RATIO' not in dir():
     LOGO_PARAMS_SPACING_RATIO = 0.03
-if 'LOGO_HEIGHT_RATIO' not in dir():
-    LOGO_HEIGHT_RATIO = 0.7
 if 'VERTICAL_OFFSET_RATIO' not in dir():
     VERTICAL_OFFSET_RATIO = 0.15
-if 'COLOR_CAMERA' not in dir():
-    COLOR_CAMERA = (30, 30, 30)
-if 'COLOR_LENS' not in dir():
-    COLOR_LENS = (120, 120, 120)
-if 'COLOR_PARAMS' not in dir():
-    COLOR_PARAMS = (30, 30, 30)
-if 'COLOR_DATE' not in dir():
-    COLOR_DATE = (100, 100, 100)
-if 'COLOR_BORDER' not in dir():
-    COLOR_BORDER = (255, 255, 255)
 if 'TRANSPARENT_TEXT_COLOR' not in dir():
     TRANSPARENT_TEXT_COLOR = (255, 255, 255)
 if 'TRANSPARENT_MARGIN_RATIO' not in dir():
     TRANSPARENT_MARGIN_RATIO = 0.02
-if 'BLUR_TEXT_COLOR' not in dir():
-    BLUR_TEXT_COLOR = (255, 255, 255)
 if 'BLUR_BOTTOM_RATIO_MULTIPLIER' not in dir():
     BLUR_BOTTOM_RATIO_MULTIPLIER = 1.8
 if 'BLUR_BRIGHTNESS_FACTOR' not in dir():
@@ -346,18 +330,6 @@ if 'OUTPUT_FILENAME_FORMAT' not in dir():
     OUTPUT_FILENAME_FORMAT = '{name}_{style}_watermark'
 if 'OVERWRITE_EXISTING' not in dir():
     OVERWRITE_EXISTING = False
-if 'AUTO_OPEN_OUTPUT' not in dir():
-    AUTO_OPEN_OUTPUT = False
-if 'SHOW_CONSOLE_WINDOW' not in dir():
-    SHOW_CONSOLE_WINDOW = False
-if 'BORDER_BACKGROUND_IMAGE' not in dir():
-    BORDER_BACKGROUND_IMAGE = ''
-if 'BORDER_BACKGROUND_OPACITY' not in dir():
-    BORDER_BACKGROUND_OPACITY = 128
-if 'DEFAULT_BRAND' not in dir():
-    DEFAULT_BRAND = ''
-if 'DEFAULT_PREVIEW_PHOTO' not in dir():
-    DEFAULT_PREVIEW_PHOTO = ''
 
 # ========== 控制台窗口显示控制（仅exe模式生效） ==========
 # 源码运行时始终显示控制台，方便调试；exe模式按配置隐藏
@@ -2071,12 +2043,19 @@ def update_ini_value(section: str, key: str, value_str: str) -> bool:
                 cp.remove_option(section, opt)
         cp.set(section, key, value_str)
         user_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(user_path, 'w', encoding='utf-8') as f:
-            f.write('# ==========================================\n')
-            f.write('# 个人设置（由程序设置窗口自动生成，无需手动编辑）\n')
-            f.write('# 此文件不会被程序更新覆盖，请放心使用\n')
-            f.write('# ==========================================\n')
-            cp.write(f)
+        # 原子写：写一半崩溃/断电会留下半截 用户设置.ini，下次启动读取失败
+        # 时全部个人设置静默丢失。先写临时文件再 os.replace（项目内
+        # compressor.write_atomic / sr_suggest.record_done 同款惯例）
+        import io as _io
+        buf = _io.StringIO()
+        buf.write('# ==========================================\n')
+        buf.write('# 个人设置（由程序设置窗口自动生成，无需手动编辑）\n')
+        buf.write('# 此文件不会被程序更新覆盖，请放心使用\n')
+        buf.write('# ==========================================\n')
+        cp.write(buf)
+        tmp_path = user_path.with_suffix('.ini.tmp')
+        tmp_path.write_text(buf.getvalue(), encoding='utf-8')
+        tmp_path.replace(user_path)
         return True
     except Exception as e:
         print(f"[警告] 保存个人配置失败: {e}")
@@ -2104,7 +2083,11 @@ def refresh_globals_from_ini():
     DEFAULT_STYLE = get_config_value('基础设置', '默认样式', DEFAULT_STYLE)
     DEFAULT_TEXT = get_config_value('基础设置', '自定义文字', DEFAULT_TEXT)
     DEFAULT_BRAND = get_config_value('基础设置', '默认品牌', DEFAULT_BRAND)
-    SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式', False, 'bool') else 'off'
+    # 兜底用当前全局值（与模块加载的 config.py 继承口径一致），
+    # 而不是硬编码 False——否则两份 ini 均缺该键时，保存一次设置就会
+    # 把智能样式静默关掉
+    SMART_STYLE = 'auto' if get_config_value('智能样式', '启用智能样式',
+                                             SMART_STYLE == 'auto', 'bool') else 'off'
     JPEG_QUALITY = get_config_value('基础设置', 'JPEG质量', JPEG_QUALITY, 'int')
     JPEG_SUBSAMPLING = get_config_value('基础设置', 'JPEG色度采样', JPEG_SUBSAMPLING, 'int')
     BORDER_HEIGHT_RATIO = get_config_value('白条边框', '边框高度', BORDER_HEIGHT_RATIO, 'float')
