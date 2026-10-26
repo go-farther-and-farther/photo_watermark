@@ -5,7 +5,7 @@
 1) align.estimate_shift 的位移估计精度（warp 平移 t → 估计 ≈ t）
 2) sr_process.process 端到端：输出 JPG/TIFF 存在、尺寸约 2 倍、非平凡内容
 
-RAW 分支（rawpy）与连拍分组（burst_tools，需真实 RAW 的 EXIF 时间）不做单测。
+RAW 分支（rawpy）与连拍分组（sr_suggest.scan_photos，需真实 RAW 的 EXIF 时间）不做单测。
 """
 import sys
 from pathlib import Path

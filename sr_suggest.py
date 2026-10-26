@@ -15,6 +15,7 @@ import datetime
 import hashlib
 import json
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +24,6 @@ import cv2
 import numpy as np
 
 from align import estimate_shift, read_raw_as_gray
-from burst_tools import _exif_datetime, _exif_subsecond
 
 RAW_EXTS = ('.nef', '.nrw', '.arw', '.cr2', '.cr3', '.orf', '.raf', '.dng', '.rw2')
 JPG_EXTS = ('.jpg', '.jpeg')
@@ -54,6 +54,41 @@ class Verdict:
     suggested_frames: int = 0
     metrics: dict = field(default_factory=dict)
 
+
+
+def _exif_datetime(path, exifread_mod):
+    """读取 EXIF 拍摄时间，返回秒级 float 时间戳；失败返回 None
+
+    （2026-10-26 自 burst_tools.py 并入：那是唯一 importer，整文件已删）"""
+    try:
+        with open(str(path), 'rb') as f:
+            tags = exifread_mod.process_file(f, details=False, stop_tag='EXIF DateTimeOriginal')
+        for key in ('EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime'):
+            if key in tags:
+                s = str(tags[key])
+                m = re.match(r'(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})', s)
+                if m:
+                    import datetime
+                    dt = datetime.datetime(*map(int, m.groups()))
+                    return dt.timestamp()
+    except Exception:
+        return None
+    return None
+
+
+def _exif_subsecond(path, exifread_mod):
+    """读取毫秒字段（部分机身有 SubSecTime），返回 [0,1) 小数部分"""
+    try:
+        with open(str(path), 'rb') as f:
+            tags = exifread_mod.process_file(f, details=False, stop_tag='EXIF SubSecTime')
+        for key in ('EXIF SubSecTimeOriginal', 'EXIF SubSecTime', 'EXIF SubSecTimeDigitized'):
+            if key in tags:
+                v = str(tags[key]).strip()
+                if v.isdigit():
+                    return int(v[-3:]) / 1000.0
+    except Exception:
+        pass
+    return 0.0
 
 def dedup_raw_jpg(files):
     """同主文件名（stem）同时有 RAW 与 JPG 时只留 RAW（双格式拍摄的影子 JPG 去掉）"""

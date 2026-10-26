@@ -27,7 +27,6 @@ if _threads_cfg > 0:
 
 import datetime
 import queue
-import shutil
 import threading
 import traceback
 from pathlib import Path
@@ -499,9 +498,6 @@ class App:
         self._work = threading.Thread(target=work, daemon=True)
         self._work.start()
 
-
-def clean_tmp(tmp):
-    shutil.rmtree(str(tmp), ignore_errors=True)
 
 
 class Redirector:
