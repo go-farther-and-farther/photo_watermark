@@ -280,7 +280,7 @@ class App:
                     self.var_status.set('完成')
                     self._scanning = False
                     self.pbar.config(value=0)
-                    self.btn_cancel.state(['normal'])
+                    self.btn_cancel.state(['!disabled'])
                     self._set_buttons(True)
                 elif isinstance(msg, tuple) and msg[0] == '__VERDICTS__':
                     self._populate(msg[1], msg[2], msg[3])
@@ -292,6 +292,15 @@ class App:
                     self.log(msg)
         except queue.Empty:
             pass
+        except Exception:                              # noqa: BLE001
+            # 处理消息自身出错不能杀死轮询循环——循环一死，消息/按钮/进度
+            # 全部停摆（2026-10-26 实锤：state(['normal']) 的 TclError 让
+            # 界面卡死，与 blur_gui 修过的同类问题一个模子）
+            import traceback as _tb
+            try:
+                self.log('处理消息出错：\n' + _tb.format_exc(limit=3))
+            except Exception:                          # noqa: BLE001
+                pass
         self.root.after(150, self._poll)
 
     def _set_buttons(self, on):
