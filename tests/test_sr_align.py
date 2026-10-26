@@ -373,3 +373,30 @@ class TestSelectBestFramesSharpGate:
         assert len(fs) == 12                     # 20 - 3(糊) - 2(位移) = 15 > 12，取 12
         assert "DSC_0000.NEF" in names and fs[ri].name == "DSC_0000.NEF"
         assert not {"DSC_0003.NEF", "DSC_0007.NEF", "DSC_0011.NEF"} & set(names)
+
+
+class TestChinesePath:
+    """Windows 中文路径：cv2.imread 静默返回 None，必须走 np.fromfile+imdecode"""
+
+    def test_read_raw_as_gray_chinese_dir(self, tmp_path):
+        import align
+        d = tmp_path / '照片_测试目录'
+        d.mkdir()
+        p = d / '帧01.jpg'
+        img = (np.random.default_rng(3).random((60, 80, 3)) * 255).astype(np.uint8)
+        ok, buf = cv2.imencode('.jpg', img)
+        assert ok
+        buf.tofile(str(p))          # cv2.imwrite 同样不认中文路径
+        gray = align.read_raw_as_gray(p, half_size=True)
+        assert gray.shape == (30, 40) and np.isfinite(gray).all()
+
+    def test_read_raw_full_chinese_dir(self, tmp_path):
+        d = tmp_path / '夜景_连拍'
+        d.mkdir()
+        p = d / '组 1.jpg'
+        img = (np.random.default_rng(4).random((50, 70, 3)) * 255).astype(np.uint8)
+        ok, buf = cv2.imencode('.jpg', img)
+        assert ok
+        buf.tofile(str(p))          # cv2.imwrite 同样不认中文路径
+        arr = sr_process.read_raw_full(p)
+        assert arr.shape == (50, 70, 3) and 0.0 <= arr.min() and arr.max() <= 1.0

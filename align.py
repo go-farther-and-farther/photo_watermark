@@ -10,8 +10,10 @@ def read_raw_as_gray(raw_path, half_size=False):
     """读取 RAW 或 JPG 并转灰度（带 gamma）"""
     path = str(raw_path).lower()
     if path.endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff')):
-        # 普通图片直接读取
-        img = cv2.imread(str(raw_path))
+        # 普通图片直接读取。cv2.imread 在 Windows 下不认中文路径（静默返回
+        # None），一律走字节流 imdecode——用户照片目录带中文是常态
+        img = cv2.imdecode(np.fromfile(str(raw_path), dtype=np.uint8),
+                           cv2.IMREAD_COLOR)
         if img is None:
             raise FileNotFoundError(f"无法读取: {raw_path}")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
@@ -59,7 +61,7 @@ def estimate_shift(ref_gray, target_gray, crop_ratio=0.6):
         crop_ratio: 中心裁切比例 (0.6 = 只用中间60%区域)
 
     返回:
-        (dx, dy) 亚像素位移
+        (dx, dy, response) 亚像素位移与相位相关响应值（0..1，越高越可信）
     """
     h, w = ref_gray.shape
 

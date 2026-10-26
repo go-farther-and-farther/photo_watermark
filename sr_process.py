@@ -32,7 +32,9 @@ def read_raw_full(raw_path, camera_space=False):
     """
     path = str(raw_path).lower()
     if path.endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff')):
-        img = cv2.imread(str(raw_path), cv2.IMREAD_UNCHANGED)
+        # cv2.imread 不认 Windows 中文路径（静默 None），走字节流 imdecode
+        img = cv2.imdecode(np.fromfile(str(raw_path), dtype=np.uint8),
+                           cv2.IMREAD_UNCHANGED)
         if img is None:
             raise FileNotFoundError(f"无法读取: {raw_path}")
         if len(img.shape) == 2:
