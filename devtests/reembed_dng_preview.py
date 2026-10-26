@@ -39,11 +39,18 @@ XYZ2SRGB = np.array([[3.2404542, -1.5371385, -0.4985314],
 
 
 def _et_read(et, tags, path):
-    """exiftool -s3 逐行取标签值，返回 dict（缺的标签为 ''）"""
-    r = subprocess.run([et, '-s3', *tags, str(path)],
-                       capture_output=True, text=True, timeout=120)
-    vals = (r.stdout or '').splitlines()
-    return dict(zip(tags, vals + [''] * (len(tags) - len(vals))))
+    """exiftool -s3 逐标签取值，返回 dict。
+
+    必须带 -f：缺标签时占位输出 '-'，保证行序与请求的标签一一对应——
+    不带 -f 时缺标签直接少一行，按位置 zip 会整体错位（缺
+    UniqueCameraModel 时相机型号会拿到 DNGVersion 的值，静默写错标签）。
+    encoding='utf-8', errors='replace'：Windows 下避免 locale 解码 mojibake。"""
+    r = subprocess.run([et, '-s3', '-f', *tags, str(path)],
+                       capture_output=True, text=True,
+                       encoding='utf-8', errors='replace', timeout=120)
+    vals = [v.strip() for v in (r.stdout or '').splitlines()]
+    return {t: ('' if v == '-' else v)
+            for t, v in zip(tags, vals + ['-'] * (len(tags) - len(vals)))}
 
 
 def _nums(s):
@@ -190,7 +197,7 @@ def main():
     root = Path(args.target)
     dngs = sorted(root.glob('*.dng')) if root.is_dir() else [root]
     dngs = [p for p in dngs if p.suffix.lower() == '.dng' and p.is_file()
-            and not p.name.endswith('.bak')]
+            and not p.name.endswith(('.bak', '.tmp.dng'))]
     if not dngs:
         print('没有找到 DNG')
         return 1
@@ -201,6 +208,9 @@ def main():
         try:
             n_ok += process_one(et, p, args, ref_dirs)
         except Exception as exc:                      # noqa: BLE001
+            # 异常路径的 .tmp.dng 不清掉，下次会被当成目标 DNG 再处理，
+            # 生成 x.tmp.tmp.dng 甚至把半成品覆盖到原文件
+            p.with_suffix('.tmp.dng').unlink(missing_ok=True)
             print(f'  [失败] {p.name}: {exc}')
     print(f'完成 {n_ok}/{len(dngs)}')
     return 0 if n_ok == len(dngs) else 1
