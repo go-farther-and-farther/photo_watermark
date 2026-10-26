@@ -26,6 +26,7 @@ if _threads_cfg > 0:
         os.environ[_v] = str(_threads_cfg)
 
 import datetime
+import io
 import queue
 import threading
 import traceback
@@ -109,6 +110,13 @@ class App:
         self.root.destroy()
 
     def _build(self):
+        # 深蓝标题栏：与主窗口 / 清糊片窗口同一套视觉（三窗一致）
+        head = tk.Frame(self.root, bg='#1e3a5f')
+        head.pack(fill='x')
+        tk.Label(head, text='🔬 超分合成', font=('Microsoft YaHei UI', 15, 'bold'),
+                 bg='#1e3a5f', fg='#ffffff').pack(side='left', padx=14, pady=10)
+        tk.Label(head, text='手持连拍多帧超分辨率：扫描分组 → 勾选 → 合成（DNG底片 + 2x JPG）',
+                 font=('Microsoft YaHei UI', 9), bg='#1e3a5f', fg='#9db4d0').pack(side='left')
         pad = dict(padx=8, pady=4)
         f1 = ttk.Frame(self.root); f1.pack(fill='x', **pad)
         ttk.Label(f1, text='照片文件夹:').pack(side='left')
@@ -219,6 +227,9 @@ class App:
         self.btn_cancel = btn_cancel
         self.var_status = tk.StringVar(value='就绪')
         ttk.Label(f4, textvariable=self.var_status, foreground='#0a7').pack(side='left', padx=16)
+        # 合成进度条：逐组推进（此前合成几分钟内状态栏只有一句"合成中…"）
+        self.pbar = ttk.Progressbar(f4, length=200, mode='determinate')
+        self.pbar.pack(side='right', padx=8)
 
         self.var_summary = tk.StringVar(value='先「① 扫描并判定」，可超分的组默认勾选')
         ttk.Label(self.root, textvariable=self.var_summary,
@@ -268,10 +279,15 @@ class App:
                 if msg == '__DONE__':
                     self.var_status.set('完成')
                     self._scanning = False
+                    self.pbar.config(value=0)
                     self.btn_cancel.state(['normal'])
                     self._set_buttons(True)
                 elif isinstance(msg, tuple) and msg[0] == '__VERDICTS__':
                     self._populate(msg[1], msg[2], msg[3])
+                elif isinstance(msg, tuple) and msg[0] == 'status':
+                    self.var_status.set(msg[1])      # \r 覆写式进度（融合: 3/48 块）
+                elif isinstance(msg, tuple) and msg[0] == 'pb':
+                    self.pbar.config(value=msg[1])   # 合成逐组推进
                 else:
                     self.log(msg)
         except queue.Empty:
@@ -451,9 +467,11 @@ class App:
         self.var_status.set('合成中…')
         self._set_buttons(False)
         self.btn_cancel.state(['disabled'])   # 合成没有取消钩子，别留可点的取消
+        self.pbar.config(maximum=len(sel), value=0)
 
         def work():
             try:
+                import contextlib
                 import re
                 from sr_process import process
                 total = len(sel)
@@ -465,9 +483,10 @@ class App:
                     base = self._unique_base(dst, tstr, gi, scale,
                                              master_lbl if master else None, use_dng)
                     self.q.put(f'[{k}/{total}] 组{gi:02d} {len(v.files)}帧: 合成中…')
-                    buf = io_log()
+                    self.q.put(('pb', k - 1))
+                    buf = _LiveLog(self.q)      # 实时日志：完成行进日志、\r 进度进状态栏
                     try:
-                        with Redirector(buf):
+                        with contextlib.redirect_stdout(buf):
                             # 文件清单直传：不再拷贝临时文件夹（省时省盘）
                             process(files=list(v.files), output_path=str(base) + '.tif',
                                     scale=scale,
@@ -491,6 +510,8 @@ class App:
                     except Exception as e:
                         self.q.put(f'  [失败] {e}')
                         continue
+                    finally:
+                        self.q.put(('pb', k))
                     jpg = Path(f'{base}_{scale}x.jpg')
                     kept_master = None
                     if master:
@@ -519,33 +540,27 @@ class App:
 
 
 
-class Redirector:
-    """把 process() 的 print 重定向到 StringIO"""
-    def __init__(self, buf):
-        self.buf = buf
+class _LiveLog(io.StringIO):
+    """process() 的 stdout 双写：既留缓冲（供"耗时"正则），又实时进 GUI。
 
-    def __enter__(self):
-        import contextlib
-        self.cm = contextlib.redirect_stdout(self.buf)
-        return self.cm.__enter__()
+    - 完成行（不含 \\r）→ 队列 → 日志区实时滚动（此前整段吞进缓冲，
+      合成几分钟内界面毫无反馈）；
+    - \\r 覆写式进度（"融合: 3/48 块"）→ ('status', ...) → 状态栏单行刷新，
+      不进日志区防刷屏。
+    print 的一次调用可能拆成多次 write，按片段判断即可：\\r 进度总是
+    独立片段开头。"""
 
-    def __exit__(self, *a):
-        return self.cm.__exit__(*a)
-
-
-class io_log:
-    def __init__(self):
-        import io
-        self._b = io.StringIO()
-
-    def getvalue(self):
-        return self._b.getvalue()
+    def __init__(self, q):
+        super().__init__()
+        self._q = q
 
     def write(self, s):
-        return self._b.write(s)
-
-    def flush(self):
-        pass
+        super().write(s)
+        if s.startswith('\r'):
+            self._q.put(('status', s.strip() or '…'))
+        elif s.strip():
+            self._q.put(s.rstrip())
+        return len(s)
 
 
 def open_sr_window(parent):
