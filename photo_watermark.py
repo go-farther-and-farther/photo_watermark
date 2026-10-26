@@ -57,7 +57,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 # ========== 版本与项目信息 ==========
-VERSION = 'v2.1.2'
+VERSION = 'v2.2.0'
 PROJECT_URL = 'https://github.com/go-farther-and-farther/photo_watermark'
 
 
