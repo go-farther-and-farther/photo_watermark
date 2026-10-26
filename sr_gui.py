@@ -160,6 +160,14 @@ class App:
         c = ttk.Checkbutton(f3b, text='JPG更锐利', variable=self.var_rl)
         c.pack(side='left', padx=(14, 2))
         ToolTip(c, '输出的 JPG 先做智能锐化，看起来更锐；只影响 JPG，DNG 底片保持原始数据')
+        # 合成完自动出双图对比：中位锐度单帧 vs 合成（同一渲染管线），
+        # 放到 SR输出 同级的 SR对比图/<批次>/，不进 SR输出（LR 会整目录扫描）
+        self.var_compare = tk.BooleanVar(value=True)
+        c = ttk.Checkbutton(f3b, text='出对比图(单帧vs合成)', variable=self.var_compare)
+        c.pack(side='left', padx=(14, 2))
+        ToolTip(c, '合成完成后自动生成一张双图对比：中位锐度单帧 vs 合成结果，\n'
+                   '同一渲染管线（色调可比），输出到 SR输出 同级的 SR对比图/<批次>/ 目录。\n'
+                   '想看指定位置的细节裁切对比用主界面「📐 四格对比」窗口')
 
         # 第二行：画质增强 + 外部引擎（语义分组，也不再受窗宽裁切）
         f3c = ttk.Frame(self.root); f3c.pack(fill='x', **pad)
@@ -378,6 +386,7 @@ class App:
         keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
         enhance = self.var_enhance.get()
+        compare_out = self.var_compare.get()
         use_k14 = self.var_engine14.get()
         k14 = self.var_k14.get().strip() or None
         if use_k14 and not k14:
@@ -426,7 +435,8 @@ class App:
                                     k14_backend=(k14 if use_k14 else None),
                                     use_homography=enhance,
                                     use_noise_weight=enhance,
-                                    use_local_align=enhance)
+                                    use_local_align=enhance,
+                                    compare_out=compare_out)
                         m = re.search(r'耗时: ([\d.]+)', buf.getvalue())
                         t = f'{float(m.group(1)):.0f}s' if m else '?'
                     except ValueError as e:

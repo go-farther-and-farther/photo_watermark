@@ -102,6 +102,37 @@ class TestProcess:
         assert jimg is not None
         assert (jimg.shape[0], jimg.shape[1]) == (out_h, out_w)
 
+    def test_compare_out_generates_two_panel_png(self, tmp_path):
+        """compare_out=True：成品之外自动出双图对比（中位锐度单帧 vs 合成）"""
+        pytest.importorskip("PIL")
+        burst = tmp_path / "burst2"
+        burst.mkdir()
+        img = _base_image()
+        for i, (dx, dy) in enumerate([(0.0, 0.0), (0.4, 0.2), (0.9, 0.7),
+                                      (0.1, 1.1), (-0.4, 0.3)]):
+            frame = (np.clip(_warp(img, dx, dy), 0, 1) * 255).astype(np.uint8)
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            assert ok
+            (burst / f"f{i}.jpg").write_bytes(buf.tobytes())
+
+        out_base = tmp_path / "cmp"
+        sr_process.process(
+            str(burst), str(out_base) + '.tif',
+            scale=2, max_frames=5, max_shift=50.0, sharpen=0.0,
+            compare_out=True, compare_long_side=300,
+        )
+        cmp_png = tmp_path / "cmp_2x_对比.png"     # 不在 SR输出 结构下 → 与 JPG 同目录
+        assert cmp_png.exists(), f'对比图未生成: {list(tmp_path.iterdir())}'
+        jimg = cv2.imread(str(tmp_path / "cmp_2x.jpg"))
+        assert jimg is not None
+        out_h, out_w = jimg.shape[:2]
+        cw = min(300, out_w)
+        ch = round(out_h * cw / out_w)
+        from PIL import Image
+        with Image.open(cmp_png) as im:
+            assert im.size == (cw * 2 + 18 * 3, 58 + 34 + ch + 44 + 18)
+
 
 class TestExifCopy:
     """参考帧完整 EXIF（含镜头型号）经 ExifTool 拷到输出文件"""

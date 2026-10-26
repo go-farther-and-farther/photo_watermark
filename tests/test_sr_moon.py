@@ -207,7 +207,9 @@ class TestDarkDominantPreview:
         assert med - inner > 0.05, '月面层次被拉平'
 
     def test_normal_scene_keeps_old_behaviour(self):
-        # 普通风景（暗部到高光跨度大、没有"亮部平台"）仍走原来的 0.5/99.5 全帧拉伸
+        # 普通风景（暗部到高光跨度大、没有"亮部平台"）仍走全帧分位拉伸 +
+        # 高光软肩：暗部压到黑、高光接近白但**不顶格**——顶格正是旧版死白
+        # 的来源（2026-10-26 渲染 v3：P99.9 + 软肩后高光块到 ~0.93）
         rng = np.random.default_rng(7)
         h, w = 256, 256
         yy, xx = np.mgrid[0:h, 0:w]
@@ -219,7 +221,8 @@ class TestDarkDominantPreview:
         eye = np.eye(3, dtype=np.float64)
         out = sr_process.render_srgb_preview(img, (eye, 0.0), stretch=True)
         o = out.astype(np.float32) / 255.0
-        assert float(o.min()) < 0.02 and float(o.max()) > 0.95
+        assert float(o.min()) < 0.02 and float(o.max()) > 0.90
+        assert float(o.max()) < 0.99, '高光被顶到贴 255（软肩失效）'
 
 
 def test_registration_outliers_reject_unregistered_frames():

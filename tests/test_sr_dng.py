@@ -118,6 +118,25 @@ def _read_subifd_raw(dng_path):
 
 
 class TestWriteLinearDng:
+    def test_preview_resized_to_max_side(self, tmp_path):
+        """内嵌预览按 preview_max_side 缩放（默认 4096）：Windows 资源管理器/
+        照片应用显示的就是这层，太小会被当成"尺寸大画质低"（实测 1600 时
+        预览只有 1024x749）。JPEG 压缩保持 photometric=2（Adobe 惯例）。"""
+        et = _exiftool_or_skip()
+        arr = np.full((64, 48, 3), 30000, np.uint16)
+        preview = np.zeros((375, 500, 3), np.uint8)
+        dng = tmp_path / "prev.dng"
+        assert sr_process.write_linear_dng(
+            dng, arr, Z6_MATRIX, [0.6337, 1.0, 0.6344],
+            camera_model="NIKON Z 6", exiftool=et, preview_rgb=preview,
+            preview_max_side=120)
+        tf = tifffile.TiffFile(str(dng))
+        ifd0 = tf.pages[0]
+        assert ifd0.shape == (90, 120, 3)       # 500x375 -> 120x90
+        assert ifd0.photometric == 2            # JPEG 不得写成 YCbCr(6)
+        back = ifd0.asarray()
+        assert back.shape == (90, 120, 3)       # JPEG 预览可解码
+
     def test_creates_valid_dng(self, tmp_path):
         et = _exiftool_or_skip()
         import subprocess

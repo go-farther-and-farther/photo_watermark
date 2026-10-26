@@ -334,14 +334,39 @@ def _chroma_denoise(rgb, shift=1):
     out[:, :, 0] = y + cr
     out[:, :, 1] = y
     out[:, :, 2] = y + cb
-    return np.clip(out, 0, 1)
+    np.clip(out, 0, 1, out=out)
+    # 双线性上采样在色度边缘会过冲，把极亮像素顶出原值 → 高光被推到 255
+    # （2026-10-26 消融实测：软肩后本不该有 255，树冠裁切仍 5% 顶格全来自这里）。
+    # 收回到本像素原最大值以内——去色度噪不需要越过原极值。
+    np.minimum(out, rgb.max(axis=2)[..., None], out=out)
+    return out
+
+
+def _stretch_soft_shoulder(img, lo, hi, t=0.88, w=0.30):
+    """亮度拉伸 + 高光软肩：黑点硬切、白点以上 tanh 压缩（保序、渐近 1）
+
+    P99.5 硬切白点会把白点以上的层次齐刷刷变成 255（2026-10-26 视觉复检
+    G100 ISO6400 夜景对比图：斑马线条纹核心、灯下树冠死白，光晕渐变带
+    环状色阶断层；同一位置单帧有层次、合成 JPG 没有——是渲染丢的不是
+    数据曝的）。
+
+    w 是肩部宽度：tanh 渐近段若只占 (1-t)=0.12，路灯夜景里高出白点 26% 的
+    光晕（实测 0.2% 像素）会被压进 8bit 最顶上 2-3 个档位，出来就是等高线
+    条带；w=0.30 把这段摊到 10+ 个档位（白点以上略暗一点，换来层次）。
+    """
+    out = (np.asarray(img, np.float64) - lo) / (hi - lo + 1e-8)
+    np.maximum(out, 0.0, out=out)
+    over = out > t
+    if over.any():
+        out[over] = t + (1.0 - t) * np.tanh((out[over] - t) / w)
+    return out
 
 
 def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
     """融合后的 nocam 域线性数据 -> 线性sRGB（实测仿射）-> 2.2 幂 ->（可选）逐通道拉伸
 
-    stretch=True（默认）：旧 sRGB TIF 管线观感口径（gamma 2.2 + 0.5-99.5 拉伸），
-    独立 JPG 预览用，暗场提亮。
+    stretch=True（默认）：sRGB TIF 管线观感口径（gamma 2.2 + 0.5-99.9 拉伸
+    + 高光软肩），独立 JPG 预览用，暗场提亮。
     stretch=False：LR 默认渲染口径（只 gamma 不拉伸）——DNG 内嵌预览用。
     Windows 图片看的是内嵌预览，拉伸版会和 LR 的 raw 渲染明显不一致（实测）。
     cam_to_srgb 为 derive_camera_to_srgb 返回的 (A, b)。
@@ -350,6 +375,7 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
     - 高光去色：通道裁剪差异会让过曝区偏紫/偏粉（LR 有高光修复所以正常），
       按最大通道向中性白收敛，亮度保留、色度归零
     - 色度降噪：压掉色彩噪斑
+    拉伸段的高光一律走 _stretch_soft_shoulder 软肩，不再硬切白点。
     """
     A, b = cam_to_srgb
     srgb = np.clip(linear_nocam.astype(np.float64) @ np.asarray(A, np.float64).T
@@ -360,7 +386,10 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
         # 不能逐通道拉伸——各通道直方图不同，会掰歪色度（实测近距组白墙发绿）
         luma = out[:, :, 0] * 0.2126 + out[:, :, 1] * 0.7152 + out[:, :, 2] * 0.0722
         med = float(np.median(luma))
-        hi = float(np.percentile(luma, 99.5))
+        # 白点取 P99.9（原 P99.5）：高对比夜景里 P99.5 会落在光晕内部，
+        # 白点以上 0.2% 像素高出 26%，再宽的软肩也压不进 8bit——2026-10-26
+        # 与 LR 导出消融实测：P99.5→P99.9 把死白比例 3.1%→0.2%（LR 自身 1.4%）
+        hi = float(np.percentile(luma, 99.9))
         if hi > 0 and med < 0.02 * hi:
             # 黑主导画面（月亮/行星/星空/深空）：99% 像素是黑天空。全帧 0.5/99.5
             # 定标会把白点落在天空上（P99.5 仍是天空），主体被拉顶成白饼
@@ -378,7 +407,7 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
                 print(f"  预览: 黑主导画面，按主体中位定标（中位 {m:.3f}→0.62，"
                       f"天空不抬）")
             else:
-                out = np.clip(out / max(hi, 1e-6), 0, 1)
+                out = _stretch_soft_shoulder(out, 0.0, hi)
         else:
             lo = float(np.percentile(luma, 0.5))
             # 大面积亮部（白天天空/白墙）：P99.5 会落在亮部内部，直接按它定白点
@@ -393,11 +422,13 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
                 hi += 0.25 * (hi - lo)
                 print(f"  预览: 亮部平台（占 {bright:.0%}，hi-P90={hi - p90:.3f}），"
                       f"白点留余量（hi={hi:.3f}）")
-            out = np.clip((out - lo) / (hi - lo + 1e-8), 0, 1)
+            out = _stretch_soft_shoulder(out, lo, hi)
     out = _chroma_denoise(out.astype(np.float32))
-    # 高光去色：0.88（伽马后）起向中性白平滑收敛
+    # 高光去色：0.95（伽马后）起向中性白平滑收敛。起点低会把钠灯等有色高光
+    # 洗成中性白（2026-10-26 视觉复检：合成格白线偏白、单帧保持橙黄）；
+    # 通道裁剪型偏紫/粉的像素在拉伸后本就 ≥1.0，0.95 起仍能全量收敛
     mx = out.max(axis=2)
-    k = np.clip((mx - 0.88) / (1.0 - 0.88), 0.0, 1.0)
+    k = np.clip((mx - 0.95) / (1.0 - 0.95), 0.0, 1.0)
     k = k * k * (3.0 - 2.0 * k)
     if k.any():
         out = out * (1.0 - k[..., None]) + mx[..., None] * k[..., None]
@@ -407,7 +438,8 @@ def render_srgb_preview(linear_nocam, cam_to_srgb, stretch=True):
 def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
                      exiftool, preview_rgb=None, orig_raw_name=None,
                      compression=None, compressionargs=None,
-                     dng_version='1.4.0.0'):
+                     dng_version='1.4.0.0', preview_max_side=4096,
+                     preview_compression=None):
     """写 Linear DNG：Adobe 结构（IFD0 预览 + SubIFD LinearRaw 512 瓦片），ExifTool 补标签
 
     LR/ACR 打开后即为 raw：Kelvin 色温、相机配置文件、镜头矫正全部可用。
@@ -427,7 +459,10 @@ def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
     - 数值枚举必须用 `TAG#=` 语法：`-Orientation=1` 经 print 转换会写成 3；
       全局 `-n` 则会连累 `-CalibrationIlluminant1=D65`（解析成 0xD65=3429）和
       `-DNGVersion=1.4.0.0`（解析失败整条丢弃）。
-    preview_rgb 为 sRGB u8（RGB 序），超宽自动缩到 1600px；None 时退化为对 raw
+    preview_rgb 为 sRGB u8（RGB 序），超宽自动缩到 preview_max_side（默认 4096）；
+    preview_compression=None（默认，预览无压缩——Windows 资源管理器/照片应用
+    最稳，2026-10-26 实测 JPEG 压缩预览在 Raw Image Extension 下渲染成条形）
+    或 'jpeg'（体积小 ~30MB→3MB，兼容性自负）。None 时退化为对 raw
     直接 gamma（仅供无预览管线的兜底）。orig_raw_name 写入 OriginalRawFileName。
     """
     import subprocess
@@ -439,13 +474,18 @@ def write_linear_dng(path, arr_u16, color_matrix, as_shot_neutral, camera_model,
                 * 255 + 0.5).astype(np.uint8)
     else:
         prev = np.ascontiguousarray(preview_rgb)
-        if prev.shape[1] > 1600:
-            ph = max(1, round(prev.shape[0] * 1600 / prev.shape[1]))
-            prev = cv2.resize(prev, (1600, ph), interpolation=cv2.INTER_AREA)
+        if prev.shape[1] > preview_max_side:
+            ph = max(1, round(prev.shape[0] * preview_max_side / prev.shape[1]))
+            prev = cv2.resize(prev, (preview_max_side, ph), interpolation=cv2.INTER_AREA)
     tile = min(512, -(-max(w, h) // 16) * 16)  # 瓦片须为 16 的倍数且小于图时取整图
+    prev_comp = None if preview_compression is None else 'jpeg'
+    prev_args = None if preview_compression is None else {
+        'level': 88, 'outcolorspace': 'rgb'}   # JPEG 必须保持 photometric=2（Adobe 惯例）
     with tifffile.TiffWriter(str(path)) as tw:
-        tw.write(prev, photometric=2, compression=None, planarconfig='CONTIG',
-                 subfiletype=1, subifds=1, resolution=(72, 72))
+        tw.write(prev, photometric=2, compression=prev_comp,
+                 compressionargs=prev_args,
+                 planarconfig='CONTIG', subfiletype=1, subifds=1,
+                 resolution=(72, 72))
         tw.write(arr_u16, photometric=34892, compression=compression,
                  compressionargs=compressionargs,
                  planarconfig='CONTIG', subfiletype=0, tile=(tile, tile))
@@ -1531,19 +1571,19 @@ def load_subifd_rgb(dng_path):
     预览与 raw 同尺寸，不能再用"行数>1000"判别，改为按像素数取最大。
     """
     import tifffile
-    tf = tifffile.TiffFile(str(dng_path))
-    best, best_n = None, -1
-    for s in tf.series:
-        if s.dtype != np.uint16 or len(s.shape) < 2:
-            continue
-        n = int(np.prod(s.shape))
-        if n > best_n:
-            best, best_n = s, n
-    if best is not None:
-        return best.asarray()
-    for s in tf.series:
-        if s.shape[0] > 1000 and s.dtype == np.uint16:   # 主 raw 序列
-            return s.asarray()
+    with tifffile.TiffFile(str(dng_path)) as tf:
+        best, best_n = None, -1
+        for s in tf.series:
+            if s.dtype != np.uint16 or len(s.shape) < 2:
+                continue
+            n = int(np.prod(s.shape))
+            if n > best_n:
+                best, best_n = s, n
+        if best is not None:
+            return best.asarray()
+        for s in tf.series:
+            if s.shape[0] > 1000 and s.dtype == np.uint16:   # 主 raw 序列
+                return s.asarray()
     raise ValueError(f'{dng_path} 未找到 LinearRaw 序列')
 
 
@@ -1561,13 +1601,54 @@ def _master_output_size(w, h, scale, master_scale):
     return max(1, int(round(w * k))), max(1, int(round(h * k))), ms
 
 
+def _median_sharp_frame(sharp_scores, raw_files, ref_idx):
+    """中位锐度帧：比最锐帧更代表"随手一拍"的水平（最锐帧对单帧不公平地偏强）。
+    锐度分缺失或长度对不上（参考帧重对齐后）时退回参考帧。"""
+    if sharp_scores and len(sharp_scores) == len(raw_files):
+        order = sorted(range(len(raw_files)), key=lambda i: sharp_scores[i])
+        return raw_files[order[len(order) // 2]]
+    return raw_files[ref_idx]
+
+
+def _compare_output_path(jpg_path):
+    """对比图输出路径：SR输出/<批次>/ 下的成品 → 同级 SR对比图/<批次>/ 镜像目录。
+
+    SR输出 会被 LR 整目录扫描，对比图/预览图不能放进去（约定见
+    devdocs/2026-10-26 交接）。不在 SR输出 结构下时退到与 JPG 同目录。"""
+    p = Path(jpg_path)
+    if p.parent.parent.name == 'SR输出':
+        return p.parent.parent.parent / 'SR对比图' / p.parent.name / f'{p.stem}_对比.png'
+    return p.parent / f'{p.stem}_对比.png'
+
+
+def _render_compare(single_rgb, composite_rgb, labels, out_png, long_side=2200):
+    """双图对比画布：单帧（同管线渲染）与合成成品整幅并排。
+
+    两面板各自缩到 long_side 宽——内容尺度一致，可直接比噪声/锐度；
+    细节裁切的定点对比用「📐 四格对比」窗口（quad_gui），这里要的是免操作。
+    single_rgb/composite_rgb 均 RGB u8，尺寸可以不同（各自缩放）。"""
+    import quad_compare
+    h, w = composite_rgb.shape[:2]
+    cw = min(long_side, w)
+    ch = max(1, round(h * cw / w))
+    panels = []
+    for img in (single_rgb, composite_rgb):
+        p = cv2.resize(img, (cw, ch), interpolation=cv2.INTER_AREA)
+        panels.append(cv2.cvtColor(p, cv2.COLOR_RGB2BGR))
+    canvas = quad_compare.compose_grid(list(zip(labels[:2], panels)), title=labels[2])
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out_png)
+    return out_png
+
+
 def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shift=0.0,
             use_deghost=True, sharpen=0.3, use_denoise=False, denoise_strength=5,
             use_legacy=False, tile=1024, threads=0, master_scale=None, output_dng=None,
             rl_sharpen=True, blur_gate=True, sharp_gate=True, k14_backend=None,
             use_homography=True, use_noise_weight=True, use_local_align=True,
             files=None, use_subject_roi=True, subject_deconv_iters=24,
-            subject_enhance=True):
+            subject_enhance=True, compare_out=False, compare_long_side=2200):
     """output_dng：True/False 显式控制；None=自动（全 RAW 组 + ExifTool 可用则 DNG）。
 
     DNG 模式：线性相机域融合，输出 Linear DNG 母版 + sRGB JPG 预览，
@@ -1576,6 +1657,10 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
 
     files：显式文件清单（Path/str 列表）。给出时跳过 input_folder 扫描——
     GUI 按组直接传清单，不再拷贝临时文件夹。
+    compare_out：成品之外再出一张双图对比（中位锐度单帧 vs 合成，同一渲染
+    管线），写到 SR对比图/<批次>/ 镜像目录（SR输出 会被 LR 整目录扫描，
+    对比图不能放进去；不在该结构下时退到与 JPG 同目录）。
+    主体 ROI（月亮）与 K14 外挂引擎路径不生成对比图。
     """
     if threads and threads > 0:
         # 限制计算线程数（如只用 P 核 8 线程，控制功耗温度；0 = 全部核心）
@@ -1813,6 +1898,22 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
         jpg_mb = Path(jpg_path).stat().st_size / (1024*1024)
         print(f"  JPG:  {jpg_path} ({jpg_mb:.0f}MB, sRGB 预览)")
 
+        if compare_out:
+            _tc = time.time()
+            med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
+            print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
+            # 放大到合成尺寸再渲染会造 ~900MB 的 float32 中间图；改为原生解码、
+            # 同一色彩变换与渲染口径，交由 _render_compare 统一缩放（内容尺度一致）
+            single = read_raw_camera_linear(med).astype(np.float32)
+            single_prev = render_srgb_preview(single, transform, stretch=True)
+            del single
+            cmp_png = _render_compare(
+                single_prev, preview,
+                (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
+                 f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
+                _compare_output_path(jpg_path), compare_long_side)
+            print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
+
         elapsed = time.time() - t0
         print(f"\n{'=' * 60}")
         print(f"完成！ {orig_w}x{orig_h} → {out_w}x{out_h} (2x JPG) / "
@@ -1828,16 +1929,14 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
     if use_denoise:
         sr_result = denoise(sr_result, strength=denoise_strength)
 
-    # sRGB gamma + 自动亮度
+    # gamma + 自动亮度：按亮度 0.5–99.5 分位拉伸，三通道共用一组 lo/hi
+    # （逐通道拉伸会掰歪色度，见 render_srgb_preview 同名注释），高光软肩不硬切
     sr_result = np.clip(sr_result, 0, 1)
     sr_result = np.power(sr_result, 1.0 / 2.2)
-
-    # 自动亮度：拉伸到 0-1 范围（去掉最暗和最亮的 0.5%）
-    for c in range(3):
-        ch = sr_result[:, :, c]
-        lo = np.percentile(ch, 0.5)
-        hi = np.percentile(ch, 99.5)
-        sr_result[:, :, c] = np.clip((ch - lo) / (hi - lo + 1e-8), 0, 1)
+    _luma = (sr_result[:, :, 0] * 0.2126 + sr_result[:, :, 1] * 0.7152
+             + sr_result[:, :, 2] * 0.0722)
+    sr_result = _stretch_soft_shoulder(
+        sr_result, float(np.percentile(_luma, 0.5)), float(np.percentile(_luma, 99.9)))
 
     # 从参考帧读取 EXIF
     exif_data = {}
@@ -1948,6 +2047,26 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
 
     jpg_size = Path(jpg_path).stat().st_size / (1024*1024)
     print(f"  JPG:  {jpg_path} ({jpg_size:.0f}MB)")
+
+    if compare_out:
+        _tc = time.time()
+        med = _median_sharp_frame(sharp_scores, raw_files, ref_idx)
+        print(f"  对比: 单帧取 {med.name}（中位锐度，同管线渲染）...")
+        # 与重建输入同一解码 + 同一 gamma/拉伸/软肩口径（不锐化——对比的是
+        # "没有 SR 时你手上有什么"）
+        single = np.power(np.clip(read_raw_full(med).astype(np.float32), 0, 1), 1.0 / 2.2)
+        _lu = (single[:, :, 0] * 0.2126 + single[:, :, 1] * 0.7152
+               + single[:, :, 2] * 0.0722)
+        single = _stretch_soft_shoulder(single, float(np.percentile(_lu, 0.5)),
+                                        float(np.percentile(_lu, 99.5)))
+        single_u8 = (np.clip(single, 0, 1) * 255 + 0.5).astype(np.uint8)
+        del single
+        cmp_png = _render_compare(
+            single_u8, (np.clip(sr_result, 0, 1) * 255 + 0.5).astype(np.uint8),
+            (f'单帧（中位锐度 {Path(med).stem}）', f'{len(raw_files)} 帧合成',
+             f'{Path(base).name} —— 左：单帧；右：{len(raw_files)} 帧合成（同一渲染管线）'),
+            _compare_output_path(jpg_path), compare_long_side)
+        print(f"  对比: {cmp_png}（{time.time() - _tc:.1f}s）")
 
     elapsed = time.time() - t0
     sr_h, sr_w = sr_result.shape[:2]

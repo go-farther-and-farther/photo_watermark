@@ -81,6 +81,41 @@ class TestHighlightHeadroom:
         assert float(bg) < 0.05, f'暗背景被抬灰: {float(bg):.2f}'
 
 
+class TestHighlightShoulder:
+    """P99.5 白点以上的层次走 tanh 软肩，不再齐刷刷削成一片 255
+
+    2026-10-26 视觉复检 ISO6400 夜景对比图：斑马线条纹核心、灯下树冠死白、
+    光晕渐变带环状色阶断层——同一位置单帧有层次而合成 JPG 没有，定为
+    渲染硬切白点所致（数据在 DNG 里是好的）。"""
+
+    def _render(self, lin):
+        eye = np.eye(3, dtype=np.float64)
+        return sr_process.render_srgb_preview(
+            np.clip(lin, 0, 1).astype(np.float32), (eye, 0.0),
+            stretch=True).astype(np.float32) / 255.0
+
+    def test_above_whitepoint_stays_distinct(self):
+        # 渐亮坡道越过白点：软肩压缩但仍保序，坡尾亮于坡中，无平坦死白
+        h, w = 100, 120
+        lin = np.full((h, w, 3), 0.03, np.float32)
+        lin[40:44, 30:90] = np.linspace(0.5, 1.0, 60, dtype=np.float32)[None, :, None]
+        out = self._render(lin)
+        ramp = out[40:44, 30:90].mean(axis=(0, 2))
+        assert float((out >= 0.999).mean()) < 0.005, '仍有大面积贴 255'
+        assert ramp[-20:].mean() > ramp[20:40].mean() + 0.02, \
+            f'白点以上层次被压平: 尾 {ramp[-20:].mean():.3f} vs 中 {ramp[20:40].mean():.3f}'
+
+    def test_monotonic_in_highlight(self):
+        # 三个高于白点的亮度必须仍可分辨（旧硬切实现里后两个都是 255）
+        lin = np.full((20, 30, 3), 0.03, np.float32)
+        for i, v in enumerate((0.70, 0.85, 1.0)):
+            lin[5:9, 5 + i * 8:9 + i * 8] = v
+        out = self._render(lin)
+        vals = [float(out[6:8, 6 + i * 8:8 + i * 8].mean()) for i in range(3)]
+        assert vals[0] < vals[1] < vals[2] and vals[2] - vals[0] > 0.03, \
+            f'高光不可分辨: {[f"{v:.3f}" for v in vals]}'
+
+
 class TestChromaDenoise:
     """色度降噪：色彩噪斑应被压掉，亮度结构（黑白边缘）保持"""
 
