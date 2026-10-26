@@ -2054,9 +2054,11 @@ def process(input_folder=None, output_path=None, scale=2, max_frames=16, max_shi
                   f"{Path(master_path).stat().st_size/(1024*1024):.0f}MB)")
     else:
         # tifffile 按数组通道顺序原样写入，必须保持 RGB（不能转 BGR，否则红蓝互换）
+        # zlib 无损压缩（与 1.5x 母版一致）：2x 无压缩 16bit 动辄数百 MB~1GB，
+        # 默认产物不该这么占磁盘（2026-10-26 用户定调：默认要适合大多数人）
         tiff_path = base + '.tif'
         img_tiff = (np.clip(sr_result, 0, 1) * 65535).astype(np.uint16)
-        tifffile.imwrite(tiff_path, img_tiff, extratags=exif_tags)
+        tifffile.imwrite(tiff_path, img_tiff, extratags=exif_tags, compression='zlib')
         tiff_size = Path(tiff_path).stat().st_size / (1024*1024)
         if et and copy_exif_from_frame(et, ref_frame, tiff_path, width=out_w, height=out_h):
             print(f"  TIFF: {tiff_path} ({tiff_size:.0f}MB, 完整EXIF已继承)")

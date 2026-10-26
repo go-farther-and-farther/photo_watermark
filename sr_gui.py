@@ -137,7 +137,6 @@ class App:
         self.var_scale = tk.IntVar(value=2)
         self.var_sharpen = tk.DoubleVar(value=0.3)
         self.var_deghost = tk.BooleanVar(value=True)
-        self.var_keep_tif = tk.BooleanVar(value=True)
         self.var_threads = tk.IntVar(value=max(_threads_cfg, 0))
         for lab, var, w, tip in [
             ('组内最大间隔(秒)', self.var_gap, 6, '连拍组内相邻两帧的最大时间间隔；大于此间隔算新的一组'),
@@ -175,12 +174,13 @@ class App:
         ToolTip(sb, '融合固定按 2x 超采样，母版按此倍率在线性域降采样（1.0–2.0）。\n'
                     '1.5 = 4×6 照片出 6×9 档，体积约为 2x 的 56%；被天气/镜头限制\n'
                     '实际分辨率时降到 1.2–1.4 更省；2.0 = 不缩（全尺寸母版）。\n'
-                    'DNG 底片模式下母版是线性 DNG（可调色温），否则是 16bit 压缩 TIF。\n'
+                    'DNG 底片模式下母版是线性 DNG（可调色温），否则是 16bit 压缩 TIF；\n'
+                    '填 2.0 = 不缩的全尺寸母版（体积大，JPG 组为全尺寸 TIF）。\n'
                     '2x JPG 始终按全尺寸输出，分享/查看用母版看 DNG/TIF')
         tk.Label(f3b, text='x', foreground='#555').pack(side='left')
-        c = ttk.Checkbutton(f3b, text='另存全尺寸TIF', variable=self.var_keep_tif)
-        c.pack(side='left', padx=2)
-        ToolTip(c, '额外保存一份全尺寸 16bit 无损 TIF（不压缩，体积很大，适合打印/精修）')
+        # （2026-10-26 撤掉「另存全尺寸TIF」勾选框：默认开着一个几百 MB~1GB 的
+        # 无压缩产物违背"默认适合大多数人"；母版倍率=2.0 就是显式要全尺寸母版，
+        # 勍选框逻辑已名存实亡——<2 时母版按倍率缩、=2 时母版即全尺寸）
         # JPG 锐化：只影响 JPG，DNG 底片永远保持原样
         self.var_rl = tk.BooleanVar(value=True)
         c = ttk.Checkbutton(f3b, text='JPG更锐利', variable=self.var_rl)
@@ -442,7 +442,6 @@ class App:
         master = None if master_v >= scale else master_v
         master_lbl = f'{master_v:g}'
         deghost = self.var_deghost.get()
-        keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
         enhance = self.var_enhance.get()
         compare_out = self.var_compare.get()
@@ -522,11 +521,11 @@ class App:
                     elif use_dng:
                         p = Path(f'{base}_{scale}x.dng')
                         kept_master = p if p.exists() else None
-                    elif keep_tif:
+                    else:
+                        # 母版倍率 2.0 的非 DNG 组：全尺寸 TIF 就是用户要的母版，
+                        # 无条件保留（不再有"选了 2.0 却被删掉"的矛盾）
                         p = Path(f'{base}.tif')
                         kept_master = p if p.exists() else None
-                    else:
-                        Path(str(base) + '.tif').unlink(missing_ok=True)
                     record_done(dst, fp, jpg, kept_master)
                     master_name = kept_master.name if kept_master else '无母版'
                     self.q.put(f'  完成 {t} -> {jpg.name} / {master_name}')
