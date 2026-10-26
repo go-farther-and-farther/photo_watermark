@@ -94,8 +94,20 @@ class App:
         self.verdicts = []          # sr_suggest.Verdict 列表（与表格行号一一对应）
         self.checked = set()        # 勾选的组号（1 起）
         self._cancel = False
+        self._scanning = False      # 取消按钮只对扫描有意义
+        self._work = None           # 当前工作线程句柄（关窗确认用）
         self._build()
+        self.root.protocol('WM_DELETE_WINDOW', self._on_close)
         self.root.after(100, self._poll)
+
+    def _on_close(self):
+        """合成/扫描进行中关窗会杀掉 daemon 工作线程，可能留下半成品文件"""
+        if self._work is not None and self._work.is_alive():
+            if not messagebox.askyesno(
+                    '确认关闭', '正在扫描/合成，关闭会中断任务，\n'
+                    '可能留下不完整的输出文件。仍要关闭？'):
+                return
+        self.root.destroy()
 
     def _build(self):
         pad = dict(padx=8, pady=4)
@@ -198,6 +210,7 @@ class App:
         btn_cancel = ttk.Button(f4, text='取消', command=self._cancel_scan)
         btn_cancel.pack(side='left', padx=4)
         btn_cancel.skip_set = True  # 扫描中其他按钮禁用时它必须可用
+        self.btn_cancel = btn_cancel
         self.var_status = tk.StringVar(value='就绪')
         ttk.Label(f4, textvariable=self.var_status, foreground='#0a7').pack(side='left', padx=16)
 
@@ -248,6 +261,8 @@ class App:
                 msg = self.q.get_nowait()
                 if msg == '__DONE__':
                     self.var_status.set('完成')
+                    self._scanning = False
+                    self.btn_cancel.state(['normal'])
                     self._set_buttons(True)
                 elif isinstance(msg, tuple) and msg[0] == '__VERDICTS__':
                     self._populate(msg[1], msg[2], msg[3])
@@ -265,6 +280,8 @@ class App:
                         c['state'] = 'normal' if on else 'disabled'
 
     def _cancel_scan(self):
+        if not self._scanning:
+            return                   # 合成阶段没有取消钩子，别让状态栏误导
         self._cancel = True
         self.var_status.set('正在取消…（保留已判定结果）')
 
@@ -310,12 +327,17 @@ class App:
             return
         # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
         dst = self.var_dst.get().strip()
-        gap, min_frames = self.var_gap.get(), self.var_min.get()
+        try:
+            gap, min_frames = self.var_gap.get(), self.var_min.get()
+        except tk.TclError:
+            messagebox.showerror('参数错误', '组内最大间隔 / 每组最少帧数必须是数字')
+            return
         self.txt.delete('1.0', 'end')
         self.tree.delete(*self.tree.get_children())
         self.verdicts, self.checked = [], set()
         self.var_summary.set('扫描中…')
         self._cancel = False
+        self._scanning = True
         self.var_status.set('扫描判定中…')
         self._set_buttons(False)
 
@@ -334,7 +356,8 @@ class App:
             except Exception:
                 self.q.put('扫描失败:\n' + traceback.format_exc())
                 self.q.put('__DONE__')
-        threading.Thread(target=work, daemon=True).start()
+        self._work = threading.Thread(target=work, daemon=True)
+        self._work.start()
 
     def _unique_base(self, dst, tstr, gi, scale, master, use_dng):
         """输出名冲突时追加 _2/_3（已合成的组重做时会走到这里）"""
@@ -375,13 +398,17 @@ class App:
             messagebox.showerror('错误', '请设置输出文件夹')
             return
         # Tkinter 变量只能在主线程访问：参数先取好再交给工作线程
-        scale = self.var_scale.get()
+        try:
+            scale = self.var_scale.get()
+            topk = self.var_topk.get()
+            sharpen = self.var_sharpen.get()
+            threads = self.var_threads.get()
+        except tk.TclError:
+            messagebox.showerror('参数错误', '倍率 / 帧数上限 / 锐化 / 线程数必须是数字')
+            return
         use_dng = self.var_dng.get()
         master = 1.5 if self.var_master.get() else None
-        topk = self.var_topk.get()
         deghost = self.var_deghost.get()
-        sharpen = self.var_sharpen.get()
-        threads = self.var_threads.get()
         keep_tif = self.var_keep_tif.get()
         rl = self.var_rl.get()
         enhance = self.var_enhance.get()
@@ -394,6 +421,7 @@ class App:
         if use_k14 and scale != 2:
             messagebox.showinfo('提示', 'K14 外挂引擎仅支持 2x，本次按 2x 执行')
             scale = 2
+            self.var_scale.set(2)     # 回写界面，避免显示与实际倍率不一致
         Path(dst).mkdir(parents=True, exist_ok=True)
         try:
             _c2 = configparser.ConfigParser()
@@ -405,6 +433,7 @@ class App:
             pass
         self.var_status.set('合成中…')
         self._set_buttons(False)
+        self.btn_cancel.state(['disabled'])   # 合成没有取消钩子，别留可点的取消
 
         def work():
             try:
@@ -467,7 +496,8 @@ class App:
             except Exception:
                 self.q.put('失败:\n' + traceback.format_exc())
                 self.q.put('__DONE__')
-        threading.Thread(target=work, daemon=True).start()
+        self._work = threading.Thread(target=work, daemon=True)
+        self._work.start()
 
 
 def clean_tmp(tmp):

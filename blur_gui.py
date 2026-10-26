@@ -44,7 +44,9 @@ class App:
         self.q = queue.Queue()
         self.busy = False
         self._rows = []            # 确认栏行：[{'frame', 'var', 'thumb'}]
-        self._thumbs = {}          # name -> PIL.Image（主线程转 PhotoImage 用）
+        self._review_gen = 0       # 确认栏代数：旧扫描的迟到缩略图按此丢弃
+        self._last_gap = None      # 扫描时实际用的组间隔（展示用，别读回 UI 值）
+        self._worker_thread = None
 
         self.folder = tk.StringVar()
         self.ratio = tk.StringVar(value=f'{bc.DEFAULT_RATIO:.2f}')
@@ -187,10 +189,13 @@ class App:
         self._clear()
         self._clear_review()
         self.pbar.config(value=0, maximum=100)
+        self._last_gap = gap                         # 结果展示用扫描时的口径
         self._write(f'扫描 {folder}')
         self._write('（逐帧解码 RAW，几十张要一两分钟；右侧出报告后可逐帧确认）')
-        threading.Thread(target=self._worker, args=(folder, ratio, gap,
-                                                   self.after.get().strip()), daemon=True).start()
+        self._worker_thread = threading.Thread(
+            target=self._worker, args=(folder, ratio, gap, self.after.get().strip()),
+            daemon=True)
+        self._worker_thread.start()
 
     def _worker(self, folder, ratio, gap, after):
         try:
@@ -223,14 +228,19 @@ class App:
                 elif kind == 'done':
                     self._show_result(*msg[1:])
                 elif kind == 'thumb':                      # 后台缩略图：主线程转 PhotoImage
-                    _, name, pil_img = msg
-                    self._set_thumb(name, pil_img)
+                    _, gen, name, pil_img = msg
+                    if gen == self._review_gen:            # 旧一轮扫描的迟到消息丢弃
+                        self._set_thumb(name, pil_img)
                 elif kind == 'error':
                     self._finish()
                     self._write('出错了：\n' + msg[1])
                     messagebox.showerror('扫描失败', msg[1][:500])
         except queue.Empty:
             pass
+        except Exception:                                  # noqa: BLE001
+            # 处理消息自身出错不能杀死轮询循环——循环一死，进度/完成/缩略图
+            # 全部停摆且按钮永远卡在"扫描中…"，只能重启窗口
+            self._write('处理消息出错：\n' + traceback.format_exc(limit=3))
         self.win.after(120, self._poll)
 
     def _finish(self):
@@ -242,8 +252,9 @@ class App:
         self._finish()
         self.pbar.config(value=0)
         self._clear()
+        gap_text = self._last_gap if self._last_gap is not None else float(self.gap.get())
         self._write(f'{len(frames)} 张 RAW，分成 {len(groups)} 组（组内间隔 ≤ '
-                    f'{float(self.gap.get()):g}s）')
+                    f'{gap_text:g}s）')
         for gi, g in enumerate(groups, 1):
             best = max(g, key=lambda f: f.score)
             self._write(f'  组{gi}: {g[0].name} ~ {g[-1].name}  {len(g)} 帧  '
@@ -276,7 +287,7 @@ class App:
         for w in self.inner.winfo_children():
             w.destroy()
         self._rows.clear()
-        self._thumbs.clear()
+        self._review_gen += 1         # 旧代缩略图消息到达时按此丢弃
         self.review_title.config(text='待删确认（出报告后列在这里）')
 
     def _build_review(self, blur, soft):
@@ -309,18 +320,21 @@ class App:
             var.trace_add('write', lambda *_: self._sync_del_btn())
             self._rows.append({'frame': f, 'var': var, 'thumb': thumb, 'row': r})
         self._sync_del_btn()
-        # 缩略图后台生成（糊+软才有，通常不多；RAW 解码不能卡界面）
-        threading.Thread(target=self._make_thumbs, args=([f for f, _ in rows],),
-                         daemon=True).start()
+        # 缩略图后台生成（糊+软才有，通常不多；RAW 解码不能卡界面）。
+        # 带代数：换文件夹重扫后，旧线程迟到的缩略图不会贴到新行上
+        # （跨文件夹文件名高度重复，仅按名字匹配会错位）
+        gen = self._review_gen
+        threading.Thread(target=self._make_thumbs,
+                         args=([f for f, _ in rows], gen), daemon=True).start()
 
-    def _make_thumbs(self, frames):
+    def _make_thumbs(self, frames, gen):
         from PIL import Image
         for f in frames:
             try:
                 t = bc._thumb(f.path, THUMB_TILE)          # BGR ndarray（有侧车则快）
                 img = Image.fromarray(t[..., ::-1].copy())  # BGR->RGB
                 img.thumbnail((THUMB_TILE, THUMB_TILE))
-                self.q.put(('thumb', f.name, img))
+                self.q.put(('thumb', gen, f.name, img))
             except Exception:                              # noqa: BLE001
                 pass                                       # 缩略图失败不影响功能
 
