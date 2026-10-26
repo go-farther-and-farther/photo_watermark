@@ -581,3 +581,4 @@ MIT License
 
 - [Claude](https://www.anthropic.com/claude) - 参与本项目早期版本的开发
 - [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) - AI 编程助手，参与 v1.5/v1.6 版本的 Logo 修复、实时预览、设置重构、界面美化等开发
+- **ZCode**（GLM 模型驱动） - AI 编程助手，参与 v2.x 版本的超分辨率与月亮堆栈、渲染调色 v4、糊片清理、自动双图对比、DNG 母版、GUI 集成与 exe 打包修复等开发
